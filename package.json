@@ -1,0 +1,52 @@
+{
+  "name": "@mdaemon/process-queue",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "A class for pushing objects to a queue and getting the next object from the queue to be processed",
+  "main": "dist/processQueue.umd.js",
+  "module": "dist/processQueue.mjs",
+  "browser": "dist/pprocessQueue.umd.js",
+  "common": "dist/processQueue.cjs",
+  "typings": "dist/index.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "test": "jest",
+    "dev-test": "jest --watchAll",
+    "build": "rollup -c",
+    "dev": "rollup -c -w",
+    "pub": "npm run build && npm run test && npm publish"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mdaemon-technologies/process-queue.git"
+  },
+  "keywords": [
+    "queue",
+    "process",
+    "process queue"
+  ],
+  "author": {
+    "name": "MDaemon Technologies, Ltd.",
+    "email": "jonathan.ehman@mdaemon.com",
+    "url": "https://www.mdaemon.com"
+  },
+  "license": "LGPL-2.1",
+  "bugs": {
+    "url": "https://github.com/mdaemon-technologies/process-queue/issues"
+  },
+  "homepage": "https://github.com/mdaemon-technologies/process-queue#readme",
+  "devDependencies": {
+    "@rollup/plugin-typescript": "^11.1.6",
+    "@types/jest": "^29.4.0",
+    "jest": "^29.4.3",
+    "rollup": "^3.21.3",
+    "ts-jest": "^29.0.5",
+    "ts-node": "^10.9.1",
+    "typescript": "^4.9.5"
+  },
+  "dependencies": {
+    "tslib": "^2.5.0"
+  }
+}
