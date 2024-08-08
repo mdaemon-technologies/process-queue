@@ -96,7 +96,7 @@
             };
             this.doneProcessing = function (id) {
                 if (id !== undefined) {
-                    _this._inProcess["delete"](id);
+                    _this._inProcess.delete(id);
                     return;
                 }
                 _this._inProcess.clear();
