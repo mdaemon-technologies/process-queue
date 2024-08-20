@@ -1,6 +1,6 @@
 {
   "name": "@mdaemon/process-queue",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "type": "module",
   "description": "A class for pushing objects to a queue and getting the next object from the queue to be processed",
   "main": "dist/processQueue.umd.js",
