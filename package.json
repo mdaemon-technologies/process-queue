@@ -1,6 +1,6 @@
 {
   "name": "@mdaemon/process-queue",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "type": "module",
   "description": "A class for pushing objects to a queue and getting the next object from the queue to be processed",
   "main": "dist/processQueue.umd.js",
@@ -38,6 +38,7 @@
   },
   "homepage": "https://github.com/mdaemon-technologies/process-queue#readme",
   "devDependencies": {
+    "@rollup/plugin-terser": "^0.4.4",
     "@rollup/plugin-typescript": "^11.1.6",
     "@types/jest": "^29.5.12",
     "jest": "^29.7.0",
