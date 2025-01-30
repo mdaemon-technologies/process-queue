@@ -64,4 +64,39 @@ describe('ProcessQueue', () => {
     queue.getNextItem()
     expect(queue.processSize()).toBe(2)
   })
+
+  test('processBatch processes multiple items at once', () => {
+      queue.queueItem({ id: '1', value: 10 })
+      queue.queueItem({ id: '2', value: 20 })
+      queue.queueItem({ id: '3', value: 30 })
+      const batch = queue.processBatch(2)
+      expect(batch.length).toBe(2)
+      expect(queue.length()).toBe(1)
+      expect(queue.processSize()).toBe(2)
+      expect(queue.isProcessing('3')).toBe(true)
+      expect(queue.isProcessing('2')).toBe(true)
+      expect(queue.isProcessing('1')).toBe(false)
+    })
+  
+    test('isEmpty returns true when queue is empty', () => {
+      expect(queue.isEmpty()).toBe(true)
+      queue.queueItem({ id: '1', value: 10 })
+      expect(queue.isEmpty()).toBe(false)
+      queue.getNextItem()
+      expect(queue.isEmpty()).toBe(true)
+    })
+  
+    test('clear removes all items from queue and processing', () => {
+      queue.queueItem({ id: '1', value: 10 })
+      queue.queueItem({ id: '2', value: 20 })
+      queue.getNextItem()
+      expect(queue.length()).toBe(1)
+      expect(queue.processSize()).toBe(1)
+      queue.clear()
+      expect(queue.length()).toBe(0)
+      expect(queue.processSize()).toBe(0)
+      expect(queue.isEmpty()).toBe(true)
+      expect(queue.busy()).toBe(false)
+    })
+  
 })

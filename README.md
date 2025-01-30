@@ -96,6 +96,12 @@
 
   getQueue(processing: boolean = false): QueueItem[]: Returns all items in the queue, optionally moving them to the processing state.
 
+  clear(): void: Removes all items from both the queue and processing lists.
+
+  processBatch(batchSize: number): QueueItem[]: Processes multiple items from the front of the queue at once, moving them to the processing state.
+  
+  isEmpty(): boolean: Returns true if the queue contains no items, false otherwise.
+  
 ```
 
 # License #
