@@ -1,13 +1,13 @@
 {
   "name": "@mdaemon/process-queue",
-  "version": "1.3.2",
+  "version": "1.4.0",
   "type": "module",
   "description": "A class for pushing objects to a queue and getting the next object from the queue to be processed",
   "main": "dist/processQueue.umd.js",
   "module": "dist/processQueue.mjs",
-  "browser": "dist/pprocessQueue.umd.js",
+  "browser": "dist/processQueue.umd.js",
   "common": "dist/processQueue.cjs",
-  "typings": "dist/index.d.ts",
+  "typings": "dist/processQueue.d.ts",
   "publishConfig": {
     "access": "public"
   },
