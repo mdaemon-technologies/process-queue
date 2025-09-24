@@ -19,7 +19,7 @@ interface Item {
  * @param id - Value to check
  * @returns True if id is a non-empty string or number, false otherwise
  */
-const isItemID = (id) => (typeof id === "string" && id.length > 0) || typeof id === "number";
+const isItemID = (id: string | number) => (typeof id === "string" && id.length > 0) || typeof id === "number";
 
 /**
  * A queue that processes items with unique IDs
