@@ -38,6 +38,40 @@
 
 ```
 
+### Constructor Options ###
+
+The `ProcessQueue` constructor accepts two optional parameters:
+
+```javascript
+  new ProcessQueue<QueueItem>(emplace?, maxSize?)
+```
+
+**Parameters:**
+
+- `emplace` (boolean, default: `false`): Controls how duplicate items are handled when added to the queue
+  - When `false`: New items are added to the **front** of the queue, and any existing item with the same ID is removed first
+  - When `true`: New items **replace** existing items at their current position in the queue, or are added to the **end** if not found
+
+- `maxSize` (number, default: `1000`): Maximum number of items allowed in the queue
+  - Throws an error if you attempt to add items beyond this limit
+
+**Examples:**
+
+```javascript
+  // Default behavior: items added to front, max 1000 items
+  const queue1 = new ProcessQueue<MyQueueItem>();
+
+  // Custom: replace items in-place, default max size
+  const queue2 = new ProcessQueue<MyQueueItem>(true);
+
+  // Custom: add to front, max 500 items
+  const queue3 = new ProcessQueue<MyQueueItem>(false, 500);
+
+  // Custom: replace in-place, max 100 items
+  const queue4 = new ProcessQueue<MyQueueItem>(true, 100);
+```
+
+
 ### Adding Items to the Queue ###
 ```javascript
   const item: MyQueueItem = { id: '1', /* other properties */ };
