@@ -1,8 +1,8 @@
 {
   "name": "@mdaemon/process-queue",
-  "version": "1.4.2",
+  "version": "2.0.0",
   "type": "module",
-  "description": "A class for pushing objects to a queue and getting the next object from the queue to be processed",
+  "description": "A lightweight, zero-dependency queue with ID-based deduplication, in-flight tracking, priority ordering, worker auto-processing, retry/DLQ, and event-driven lifecycle",
   "main": "dist/processQueue.umd.js",
   "module": "dist/processQueue.mjs",
   "browser": "dist/processQueue.umd.js",
@@ -25,7 +25,21 @@
   "keywords": [
     "queue",
     "process",
-    "process queue"
+    "process-queue",
+    "dedup",
+    "deduplicate",
+    "in-process",
+    "task",
+    "job",
+    "unique",
+    "idempotent",
+    "priority-queue",
+    "worker",
+    "concurrency",
+    "retry",
+    "dead-letter",
+    "event-driven",
+    "typescript"
   ],
   "author": {
     "name": "MDaemon Technologies, Ltd.",
@@ -38,14 +52,14 @@
   },
   "homepage": "https://github.com/mdaemon-technologies/process-queue#readme",
   "devDependencies": {
-    "@rollup/plugin-terser": "^0.4.4",
-    "@rollup/plugin-typescript": "^12.1.2",
+    "@rollup/plugin-terser": "^1.0.0",
+    "@rollup/plugin-typescript": "^12.3.0",
     "@types/jest": "^29.5.14",
     "jest": "^29.7.0",
     "rollup": "^4.40.0",
-    "ts-jest": "^29.3.2",
+    "ts-jest": "^29.4.9",
     "ts-node": "^10.9.2",
     "tslib": "^2.8.1",
-    "typescript": "^5.8.3"
+    "typescript": "^6.0.3"
   }
 }
