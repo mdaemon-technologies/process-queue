@@ -1,1 +1,2 @@
-declare module '@mdaemon/observable/dist/processQueue.umd.js';
+export { default } from './processQueue';
+export { default as ProcessQueue } from './processQueue';
