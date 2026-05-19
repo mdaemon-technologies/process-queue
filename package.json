@@ -1,6 +1,6 @@
 {
   "name": "@mdaemon/process-queue",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "type": "module",
   "description": "A lightweight, zero-dependency queue with ID-based deduplication, in-flight tracking, priority ordering, worker auto-processing, retry/DLQ, and event-driven lifecycle",
   "main": "dist/processQueue.umd.js",
@@ -61,5 +61,12 @@
     "ts-node": "^10.9.2",
     "tslib": "^2.8.1",
     "typescript": "^6.0.3"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/processQueue.mjs",
+      "require": "./dist/processQueue.cjs",
+      "default": "./dist/processQueue.umd.js"
+    }
   }
 }
