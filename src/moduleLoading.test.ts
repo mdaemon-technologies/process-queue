@@ -1,11 +1,52 @@
 import { createRequire } from 'module'
 import { resolve } from 'path'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 
 const req = createRequire(__filename)
 const distDir = resolve(__dirname, '..', 'dist')
 
 describe('Module Loading', () => {
+  describe('type declarations', () => {
+    test('do not expose @internal members', () => {
+      const declarations = readFileSync(resolve(distDir, 'processQueue.d.ts'), 'utf-8')
+      expect(declarations).toContain('declare class ProcessQueue')
+      expect(declarations).not.toContain('_bookkeepingSizes')
+    })
+
+    // No bundle has a named ProcessQueue export, so no declaration may claim one
+    test('declare only the default export at runtime', () => {
+      const declarationFiles = (readdirSync(distDir, { recursive: true }) as string[])
+        .filter(file => file.endsWith('.d.ts'))
+      const claimsNamedExport = declarationFiles.filter(file =>
+        /default as ProcessQueue/.test(readFileSync(resolve(distDir, file), 'utf-8')))
+      expect(claimsNamedExport).toEqual([])
+    })
+
+    // The package is "type": "module", so under node16/nodenext resolution TypeScript reads
+    // the declarations as ESM, where relative imports need a file extension
+    test('use file extensions on every relative import', () => {
+      const declarationFiles = (readdirSync(distDir, { recursive: true }) as string[])
+        .filter(file => file.endsWith('.d.ts'))
+      expect(declarationFiles.length).toBeGreaterThan(1)
+      const extensionless = declarationFiles.flatMap(file => {
+        const source = readFileSync(resolve(distDir, file), 'utf-8')
+        return [...source.matchAll(/from\s+['"](\.{1,2}\/[^'"]+)['"]/g)]
+          .map(match => match[1])
+          .filter(path => !/\.(js|cjs|mjs)$/.test(path))
+          .map(path => `${file}: ${path}`)
+      })
+      expect(extensionless).toEqual([])
+    })
+  })
+
+  // The types declare `export default`, so TypeScript CommonJS consumers compile to require(...).default;
+  // plain JavaScript uses require(...) itself. Both must be the constructor.
+  test.each(['processQueue.cjs', 'processQueue.umd.js'])('%s exports the constructor as module.exports and .default', file => {
+    const exported = req(resolve(distDir, file))
+    expect(typeof exported).toBe('function')
+    expect(exported.default).toBe(exported)
+  })
+
   describe('CJS (require)', () => {
     let ProcessQueue: any
 

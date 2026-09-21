@@ -5,6 +5,7 @@
     "moduleResolution": "bundler",
     "strict": true,
     "declaration": true,
+    "stripInternal": true,
     "declarationDir": "dist",
     "outDir": "dist",
     "esModuleInterop": true,
@@ -14,5 +15,5 @@
     "types": ["node", "jest"]
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.test.ts", "node_modules"]
+  "exclude": ["src/**/*.test.ts", "src/testHelpers.ts", "node_modules"]
 }

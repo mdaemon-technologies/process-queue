@@ -1,4 +1,5 @@
 import ProcessQueue from './processQueue'
+import { flush } from './testHelpers'
 
 describe('ProcessQueue', () => {
   let queue: ProcessQueue<{ id: string, value: number }>
@@ -461,7 +462,7 @@ describe('ProcessQueue - Worker & Concurrency', () => {
     })
     queue.queueItem({ id: '1', value: 10 })
     // Allow microtask to resolve
-    await new Promise(resolve => setTimeout(resolve, 10))
+    await flush(10)
     expect(processed).toEqual(['1'])
     expect(queue.busy()).toBe(false)
   })
@@ -491,7 +492,7 @@ describe('ProcessQueue - Worker & Concurrency', () => {
 
     // Resolve first worker
     resolvers[0]()
-    await new Promise(resolve => setTimeout(resolve, 10))
+    await flush(10)
 
     // Third item should now be processing (2 still active: item 2 + item 3)
     expect(queue.processSize()).toBe(2)
@@ -500,7 +501,7 @@ describe('ProcessQueue - Worker & Concurrency', () => {
     // Resolve remaining
     resolvers[1]()
     resolvers[2]()
-    await new Promise(resolve => setTimeout(resolve, 10))
+    await flush(10)
 
     expect(maxActive).toBe(2)
     expect(queue.busy()).toBe(false)
@@ -513,7 +514,7 @@ describe('ProcessQueue - Worker & Concurrency', () => {
     })
     queue.on('error', (_item, error) => { if (error) errors.push(error) })
     queue.queueItem({ id: '1', value: 10 })
-    await new Promise(resolve => setTimeout(resolve, 10))
+    await flush(10)
     expect(errors.length).toBe(1)
     expect(errors[0].message).toBe('worker failed')
     expect(queue.busy()).toBe(false)
@@ -562,8 +563,8 @@ describe('ProcessQueue - Worker & Concurrency', () => {
     })
     queue.on('drain', drainHandler)
     queue.queueItem({ id: '1', value: 10 })
-    await new Promise(resolve => setTimeout(resolve, 10))
-    expect(drainHandler).toHaveBeenCalled()
+    await flush(10)
+    expect(drainHandler).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -578,7 +579,7 @@ describe('ProcessQueue - Retry & Dead Letter Queue', () => {
       maxRetries: 3
     })
     queue.queueItem({ id: '1', value: 10 })
-    await new Promise(resolve => setTimeout(resolve, 50))
+    await flush(50)
     expect(attempts).toBe(3)
     expect(queue.getDeadLetterQueue().length).toBe(0)
   })
@@ -591,7 +592,7 @@ describe('ProcessQueue - Retry & Dead Letter Queue', () => {
     const failedHandler = jest.fn()
     queue.on('failed', failedHandler)
     queue.queueItem({ id: '1', value: 10 })
-    await new Promise(resolve => setTimeout(resolve, 50))
+    await flush(50)
     expect(queue.getDeadLetterQueue()).toEqual([{ id: '1', value: 10 }])
     expect(failedHandler).toHaveBeenCalled()
   })
@@ -607,9 +608,9 @@ describe('ProcessQueue - Retry & Dead Letter Queue', () => {
       retryDelay: 50
     })
     queue.queueItem({ id: '1', value: 10 })
-    await new Promise(resolve => setTimeout(resolve, 20))
+    await flush(20)
     expect(attempts).toBe(1)
-    await new Promise(resolve => setTimeout(resolve, 60))
+    await flush(60)
     expect(attempts).toBe(2)
   })
 
@@ -627,8 +628,10 @@ describe('ProcessQueue - Retry & Dead Letter Queue', () => {
         return 10 * attempt
       }
     })
+    // Wait for the item to be dead-lettered rather than a fixed time: timer resolution varies by platform and load
+    const failed = new Promise<void>(resolve => queue.once('failed', () => resolve()))
     queue.queueItem({ id: '1', value: 10 })
-    await new Promise(resolve => setTimeout(resolve, 100))
+    await failed
     expect(delays).toEqual([1, 2])
     expect(queue.getDeadLetterQueue().length).toBe(1)
   })
@@ -639,7 +642,7 @@ describe('ProcessQueue - Retry & Dead Letter Queue', () => {
       maxRetries: 0
     })
     queue.queueItem({ id: '1', value: 10 })
-    await new Promise(resolve => setTimeout(resolve, 20))
+    await flush(20)
     expect(queue.getDeadLetterQueue().length).toBe(1)
     queue.clearDeadLetterQueue()
     expect(queue.getDeadLetterQueue().length).toBe(0)
@@ -654,7 +657,7 @@ describe('ProcessQueue - Retry & Dead Letter Queue', () => {
       }
     })
     queue.queueItem({ id: '1', value: 10 })
-    await new Promise(resolve => setTimeout(resolve, 20))
+    await flush(20)
     expect(attempts).toBe(1)
     // With maxRetries=0, items go straight to DLQ on first failure
     expect(queue.getDeadLetterQueue().length).toBe(1)
@@ -805,7 +808,7 @@ describe('ProcessQueue - Serialization', () => {
       maxRetries: 0
     })
     queue.queueItem({ id: '1', value: 10 })
-    await new Promise(resolve => setTimeout(resolve, 20))
+    await flush(20)
 
     const snapshot = queue.serialize()
     expect(snapshot.deadLetterQueue).toEqual([{ id: '1', value: 10 }])

@@ -1,97 +1,43 @@
+import { Item, ItemID, ListenerFor, ProcessQueueEvent, ProcessQueueOptions, Snapshot } from './types.js';
 /**
- * Type representing valid item IDs - either strings or numbers
+ * A queue that processes items with unique IDs.
+ *
+ * This class coordinates the internal modules and is the only place that emits events
+ * or calls the worker. Per-item state is always settled before an event is emitted,
+ * because a listener may call straight back into the queue.
+ * @template QueueItem - Type of items in the queue; must have an id. Without a type argument,
+ *                      items may carry any other properties.
  */
-type ItemID = string | number;
-/**
- * Interface representing queue items
- * Each item must have an ID and can have additional string-keyed properties
- */
-interface Item {
-    /** Unique identifier for the item */
-    id: ItemID;
-    /** Additional properties with unknown values */
+declare class ProcessQueue<QueueItem extends Item = Item & {
     [key: string]: unknown;
-}
-/**
- * Options for configuring a ProcessQueue instance
- */
-interface ProcessQueueOptions<QueueItem extends Item> {
-    /** If true, new items replace existing ones at their position; if false, items are added to front */
-    emplace?: boolean;
-    /** Maximum number of items allowed in queue */
-    maxSize?: number;
-    /** Custom comparator for queue ordering. Return negative if a should come before b */
-    comparator?: (a: QueueItem, b: QueueItem) => number;
-    /** Strategy when queue is full: 'reject' (throw), 'drop-oldest', 'drop-newest' */
-    overflowStrategy?: OverflowStrategy;
-    /** Worker function for auto-processing items */
-    worker?: (item: QueueItem) => Promise<void> | void;
-    /** Maximum concurrent worker invocations (default 1) */
-    concurrency?: number;
-    /** Maximum retry attempts on worker failure (default 0 = no retry) */
-    maxRetries?: number;
-    /** Delay between retries in ms, or function (attempt) => ms for backoff */
-    retryDelay?: number | ((attempt: number) => number);
-    /** Time-to-live in ms - items expire from queue after this duration */
-    ttl?: number;
-    /** Processing timeout in ms - items auto-released from in-process if not done */
-    processingTimeout?: number;
-}
-/**
- * Event types emitted by ProcessQueue
- */
-type ProcessQueueEvent = 'added' | 'processing' | 'done' | 'removed' | 'empty' | 'drain' | 'error' | 'resumed' | 'paused' | 'failed' | 'expired' | 'timeout';
-/**
- * Overflow strategy when queue is full
- */
-type OverflowStrategy = 'reject' | 'drop-oldest' | 'drop-newest';
-/**
- * Event handler type
- */
-type EventHandler<QueueItem extends Item> = (item?: QueueItem | QueueItem[], error?: Error) => void;
-/**
- * A queue that processes items with unique IDs
- * @template QueueItem - Type of items in the queue, must extend Item interface
- */
-declare class ProcessQueue<QueueItem extends Item> {
-    /** Array storing queued items */
+}> {
+    private readonly _options;
+    /** Queued items, in processing order */
     private readonly _queue;
-    /** Map storing items currently being processed */
-    private readonly _inProcess;
-    /** If true, new items replace existing ones at their position */
-    private _emplace;
-    /** Maximum number of items allowed in queue */
-    private _maxSize;
-    /** Custom comparator for priority ordering */
-    private _comparator?;
-    /** Overflow strategy */
-    private _overflowStrategy;
+    /** Items being processed */
+    private readonly _inFlight;
+    /** Retry counts and items waiting out a retry delay */
+    private readonly _retries;
+    /** Permanently failed items */
+    private readonly _deadLetters;
+    private readonly _events;
     /** Whether the queue is paused */
     private _paused;
-    /** Worker function for auto-processing */
-    private _worker?;
-    /** Maximum concurrent worker invocations */
-    private _concurrency;
-    /** Maximum retry attempts */
-    private _maxRetries;
-    /** Retry delay config */
-    private _retryDelay;
-    /** Retry count per item */
-    private readonly _retryCount;
-    /** Dead letter queue for permanently failed items */
-    private readonly _deadLetterQueue;
-    /** TTL in ms for queue items */
-    private _ttl;
-    /** Processing timeout in ms */
-    private _processingTimeout;
-    /** Timestamps when items were enqueued */
-    private readonly _enqueuedAt;
-    /** Timestamps when items started processing */
-    private readonly _processingStartedAt;
-    /** Event listeners map */
-    private readonly _listeners;
-    /** Once listeners (auto-removed after first call) */
-    private readonly _onceListeners;
+    /** True once 'empty' has been emitted for the current empty period; the queue starts empty */
+    private _emptyReported;
+    /** True once 'drain' has been emitted for the current idle period; the queue starts idle */
+    private _drainReported;
+    /** The promise shared by every onIdle() caller waiting for the queue to become idle */
+    private _idleWaiter?;
+    /** True while _autoProcess is running, to prevent re-entrant recursion */
+    private _autoProcessing;
+    /** Set when _autoProcess was requested while already running */
+    private _autoProcessAgain;
+    /**
+     * What each overflow strategy does when a new item arrives at a full queue:
+     * returns the index of the queued item to evict (-1 if none), returns null to drop the new item, or throws
+     */
+    private readonly _overflowHandlers;
     /**
      * Creates a new ProcessQueue instance
      * @param optionsOrEmplace - Options object or boolean for emplace mode (backward compat)
@@ -107,15 +53,11 @@ declare class ProcessQueue<QueueItem extends Item> {
     /**
      * Adds or updates an item in the queue
      * @param item - Item to add to queue
-     * @returns True if item was added/updated successfully, false if item is already being processed
-     * @throws {Error} If item has invalid ID or queue size limit is reached
+     * @returns True if item was added/updated, false if its ID is in-process or awaiting a retry,
+     *          or the queue is full and overflowStrategy is 'drop-newest'
+     * @throws {Error} If item has an invalid ID, or the queue is full and overflowStrategy is 'reject'
      */
     queueItem: (item: QueueItem) => boolean;
-    /**
-     * Inserts an item into the queue respecting comparator/priority ordering
-     * If no comparator: emplace mode appends to back, otherwise inserts at front
-     */
-    private _insertItem;
     /**
      * Gets and removes the next item from the queue, marking it as in-process
      * @returns The next queue item, or null if queue is empty
@@ -152,9 +94,17 @@ declare class ProcessQueue<QueueItem extends Item> {
      */
     length: <K extends keyof QueueItem>(prop?: K, val?: QueueItem[K]) => number;
     /**
-     * Clears all items from both the queue and in-process map
+     * Clears the queue, in-process items and pending retries
      */
     clear: () => void;
+    /**
+     * Waits until nothing is queued, in process or awaiting a retry.
+     * Unlike a 'drain' listener, it cannot miss work that finished before it was called.
+     * Callers waiting at the same time share one promise, so abandoned calls cost nothing.
+     * @returns A promise that resolves immediately if the queue is idle, otherwise when it next becomes
+     *          idle after every 'drain' listener has run (the queue may have new work by the time awaiting code resumes)
+     */
+    onIdle: () => Promise<void>;
     /**
      * Checks if the queue is empty
      * @returns True if the queue has no items, false otherwise
@@ -208,10 +158,11 @@ declare class ProcessQueue<QueueItem extends Item> {
      */
     getInProcess: () => QueueItem[];
     /**
-     * Adds multiple items to the queue atomically
+     * Adds multiple items to the queue in order. Not atomic: if an item throws,
+     * the items before it remain queued
      * @param items - Array of items to add
      * @returns Array of booleans indicating success for each item
-     * @throws {Error} If any item has invalid ID or queue size limit would be exceeded
+     * @throws {Error} As queueItem, on the first item that throws
      */
     queueMany: (items: QueueItem[]) => boolean[];
     /**
@@ -219,44 +170,24 @@ declare class ProcessQueue<QueueItem extends Item> {
      * @param event - Event name to listen for
      * @param handler - Function to call when event fires
      */
-    on: (event: ProcessQueueEvent, handler: EventHandler<QueueItem>) => void;
+    on: <E extends ProcessQueueEvent>(event: E, handler: ListenerFor<QueueItem, E>) => void;
     /**
      * Removes an event listener
      * @param event - Event name to remove listener from
      * @param handler - Function to remove
      */
-    off: (event: ProcessQueueEvent, handler: EventHandler<QueueItem>) => void;
+    off: <E extends ProcessQueueEvent>(event: E, handler: ListenerFor<QueueItem, E>) => void;
     /**
      * Registers a one-time event listener that auto-removes after first call
      * @param event - Event name to listen for
      * @param handler - Function to call once when event fires
      */
-    once: (event: ProcessQueueEvent, handler: EventHandler<QueueItem>) => void;
-    /**
-     * Emits an event to all registered listeners
-     */
-    private _emit;
-    /**
-     * Checks if queue is empty and no items are processing, emits drain/empty as appropriate
-     */
-    private _checkDrain;
-    /**
-     * Removes expired items from the queue (lazy TTL check)
-     */
-    private _expireItems;
+    once: <E extends ProcessQueueEvent>(event: E, handler: ListenerFor<QueueItem, E>) => void;
     /**
      * Checks for items that have exceeded the processing timeout
      * Emits 'timeout' event and removes items from in-process
      */
     checkProcessingTimeouts: () => void;
-    /**
-     * Auto-processes items when a worker is configured and concurrency allows
-     */
-    private _autoProcess;
-    /**
-     * Handles worker errors with retry logic
-     */
-    private _handleWorkerError;
     /**
      * Gets all items in the dead letter queue (permanently failed)
      * @returns Array of failed items
@@ -274,21 +205,116 @@ declare class ProcessQueue<QueueItem extends Item> {
      * Serializes the queue state to a JSON-compatible object
      * @returns Serializable snapshot of queue state
      */
-    serialize: () => {
-        queue: QueueItem[];
-        inProcess: QueueItem[];
-        deadLetterQueue: QueueItem[];
-    };
+    serialize: () => Required<Snapshot<QueueItem>>;
     /**
-     * Restores a ProcessQueue from a serialized snapshot
+     * Restores a ProcessQueue from a serialized snapshot.
+     * The snapshot is validated in full before anything is restored. With a worker configured,
+     * in-process items are treated as interrupted and queued again at the front; processing
+     * does not start until start() or resume() is called, or an item is queued.
      * @param data - Serialized data from serialize()
      * @param options - Options for the new queue instance
      * @returns A new ProcessQueue populated with the serialized state
+     * @throws {TypeError} If the snapshot is malformed, contains an invalid item, or repeats an id outside the dead letter queue
+     * @throws {RangeError} If the queue exceeds maxSize (maxSize + concurrency with a worker, allowing for retries),
+     *                      or (with a worker) in-process items exceed concurrency
      */
-    static deserialize: <T extends Item>(data: {
-        queue: T[];
-        inProcess?: T[];
-        deadLetterQueue?: T[];
-    }, options?: ProcessQueueOptions<T> | boolean) => ProcessQueue<T>;
+    static deserialize: <T extends Item>(data: Snapshot<T>, options?: ProcessQueueOptions<T> | boolean) => ProcessQueue<T>;
+    /**
+     * Emits an event. Handlers always receive both arguments (item, error), even when
+     * the event has no payload, as they always have.
+     */
+    private _emit;
+    /**
+     * Takes items from the front of the queue and marks them in-process
+     * @param count - Maximum number of items to take
+     * @returns The items taken, in queue order
+     */
+    private _takeForProcessing;
+    /**
+     * Removes a queued item for good
+     * @returns The removed item, or undefined if the id is not queued
+     */
+    private _removeQueued;
+    /**
+     * Forgets the retry counts of items that left the queue for good (removed, evicted or expired),
+     * so a later item with the same id starts with its full retry budget
+     */
+    private _forgetDiscarded;
+    /**
+     * Removes expired items from the queue (lazy TTL check)
+     */
+    private _expireItems;
+    /**
+     * Forgets everything about an in-process item: its in-flight bookkeeping and its retry count
+     */
+    private _releaseInProcess;
+    /**
+     * Releases every in-process item without a worker result, as _releaseInProcess does for one
+     */
+    private _releaseAllInProcess;
+    /**
+     * Marks one item done, if it is in-process. IDs that are queued or awaiting
+     * a retry are left alone, so their retry budget is not reset.
+     */
+    private _releaseIfInProcess;
+    /**
+     * Emits 'empty' if the queue has become empty since it was last reported empty
+     */
+    private _checkEmpty;
+    /**
+     * Records that an item entered the queue, so the next empty and idle periods are reported
+     */
+    private _markWorkAdded;
+    /** Whether nothing is queued, in process or awaiting a retry */
+    private _isIdle;
+    /**
+     * Emits 'empty' if the queue has just become empty, then 'drain' if the queue has just become idle
+     */
+    private _checkDrain;
+    /**
+     * Auto-processes items when a worker is configured and concurrency allows.
+     * Re-entrant calls (from synchronous workers, retries and listeners) are folded
+     * into the outermost call's loop so the call stack never grows with queue length.
+     */
+    private _autoProcess;
+    /**
+     * Starts the worker on queued items until concurrency is exhausted
+     */
+    private _startAvailableWork;
+    /**
+     * Completes a successful worker run
+     */
+    private _onWorkerSuccess;
+    /**
+     * Completes a failed worker run
+     */
+    private _onWorkerFailure;
+    /**
+     * Handles worker errors with retry logic.
+     * The retry is reserved (queued or pending) before 'error' is emitted, so a listener
+     * that re-queues the same id updates the retry rather than creating a duplicate.
+     */
+    private _handleWorkerError;
+    /**
+     * The delay before retrying an item, in ms
+     * @param attempt - The attempt that just failed, starting at 1
+     * @throws If the retryDelay function throws or returns a value that cannot be converted to a number
+     */
+    private _retryDelayFor;
+    /**
+     * Puts a failed item back in the queue for another attempt.
+     * Retries bypass maxSize: the item was already admitted, so the queue can
+     * exceed maxSize by at most the number of items in flight.
+     * @returns The comparator's error if it threw (the item is then not queued)
+     */
+    private _requeueForRetry;
+    /**
+     * Gives up on an item: clears its retry count and dead-letters it, then emits 'error'
+     * for the worker's error when there is one to report, and 'failed' with the final cause
+     * @param failure - The reason the item is dead-lettered, reported with 'failed'
+     * @param workerError - The worker error not yet reported with 'error', if any
+     */
+    private _failPermanently;
 }
 export default ProcessQueue;
+export type { EventHandler, Item, ItemID, ListenerFor, OverflowStrategy, ProcessQueueEvent, ProcessQueueEvents, ProcessQueueOptions, Snapshot, } from './types.js';
