@@ -1,6 +1,6 @@
 {
   "name": "@mdaemon/process-queue",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "type": "module",
   "description": "A lightweight, zero-dependency queue with ID-based deduplication, in-flight tracking, priority ordering, worker auto-processing, retry/DLQ, and event-driven lifecycle",
   "main": "dist/processQueue.umd.js",
@@ -51,6 +51,9 @@
     "url": "https://www.mdaemon.com"
   },
   "license": "LGPL-2.1",
+  "engines": {
+    "node": ">=20"
+  },
   "bugs": {
     "url": "https://github.com/mdaemon-technologies/process-queue/issues"
   },

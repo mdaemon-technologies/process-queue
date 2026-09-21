@@ -1,7 +1,12 @@
-[![Dynamic JSON Badge](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmdaemon-technologies%2Fprocess-queue%2Fmaster%2Fpackage.json&query=%24.version&prefix=v&label=npm&color=blue)](https://www.npmjs.com/package/@mdaemon/process-queue) [![Static Badge](https://img.shields.io/badge/node-v20%2B-blue?style=flat&label=node&color=blue)](https://nodejs.org)
- [![install size](https://packagephobia.com/badge?p=@mdaemon/process-queue)](https://packagephobia.com/result?p=@mdaemon/process-queue) [![Dynamic JSON Badge](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmdaemon-technologies%2Fprocess-queue%2Fmaster%2Fpackage.json&query=%24.license&prefix=v&label=license&color=green)](https://github.com/mdaemon-technologies/process-queue/blob/master/LICENSE) [![Node.js CI](https://github.com/mdaemon-technologies/process-queue/actions/workflows/node.js.yml/badge.svg)](https://github.com/mdaemon-technologies/process-queue/actions/workflows/node.js.yml)
-
 # @mdaemon/process-queue
+
+[![npm](https://img.shields.io/npm/v/@mdaemon/process-queue?color=blue)](https://www.npmjs.com/package/@mdaemon/process-queue)
+[![license](https://img.shields.io/npm/l/@mdaemon/process-queue?color=green)](LICENSE)
+[![node](https://img.shields.io/node/v/@mdaemon/process-queue)](https://nodejs.org)
+[![install size](https://packagephobia.com/badge?p=@mdaemon/process-queue)](https://packagephobia.com/result?p=@mdaemon/process-queue)
+[![CI](https://github.com/mdaemon-technologies/process-queue/actions/workflows/node.js.yml/badge.svg)](https://github.com/mdaemon-technologies/process-queue/actions/workflows/node.js.yml)
+
+A lightweight, zero-dependency queue with ID-based deduplication, in-flight tracking, priority ordering, worker auto-processing, retry/DLQ, and event-driven lifecycle
 
 **Tired of checking if a job is already queued before adding it?** ProcessQueue handles deduplication, in-flight tracking, priority ordering, and auto-processing so you don't have to.
 
@@ -25,38 +30,39 @@ A lightweight, zero-dependency TypeScript queue that replaces the hand-rolled `S
 
 Those are excellent tools — but they require Redis, infrastructure, or solve a different scope. ProcessQueue is the **no-infrastructure** option: an in-memory primitive for deduplication and processing-state tracking. Use it when you need a smart queue without the operational overhead.
 
----
-
 ## Install
 
 ```bash
-npm install @mdaemon/process-queue --save
+npm install @mdaemon/process-queue
 ```
 
-### Node CommonJS
-```javascript
-const ProcessQueue = require("@mdaemon/process-queue");
-```
+## Usage
 
-### Node ES Modules / TypeScript
-```javascript
+### ES modules
+
+```js
 import ProcessQueue from "@mdaemon/process-queue";
+```
+
+### CommonJS
+
+```js
+const ProcessQueue = require("@mdaemon/process-queue");
 ```
 
 Import the package root. Deep imports such as `@mdaemon/process-queue/dist/processQueue.cjs` are blocked by the package's `exports` map.
 
-### Browser
+### Browser (UMD)
+
 ```html
 <script type="text/javascript" src="/path_to_modules/dist/processQueue.umd.js"></script>
 ```
-
----
 
 ## Quick Start
 
 ### Basic Queue (Manual Processing)
 
-```typescript
+```ts
 import ProcessQueue from "@mdaemon/process-queue";
 
 interface Task {
@@ -81,7 +87,7 @@ queue.doneProcessing(task!.id);
 
 ### Auto-Processing with Worker
 
-```typescript
+```ts
 const queue = new ProcessQueue<Task>({
   concurrency: 3,
   worker: async (task) => {
@@ -102,7 +108,7 @@ console.log("All done!");
 
 ### Priority Queue
 
-```typescript
+```ts
 const queue = new ProcessQueue<Task & { priority: number }>({
   comparator: (a, b) => b.priority - a.priority, // higher priority first
   worker: async (task) => { /* ... */ }
@@ -118,7 +124,7 @@ queue.resume(); // "high" is processed first
 
 ### Retry with Backoff
 
-```typescript
+```ts
 const queue = new ProcessQueue<Task>({
   worker: async (task) => { /* might fail */ },
   maxRetries: 3,
@@ -129,11 +135,9 @@ queue.on("failed", (task) => console.log(`Permanently failed: ${task.id}`));
 console.log(queue.getDeadLetterQueue()); // inspect failures
 ```
 
----
-
 ## Constructor
 
-```typescript
+```ts
 // Options object (recommended)
 new ProcessQueue<T>(options?: ProcessQueueOptions<T>)
 
@@ -159,8 +163,6 @@ new ProcessQueue<T>(emplace?: boolean, maxSize?: number)
 | `onListenerError` | `(error, event) => void` | `console.error` | Receives exceptions thrown by event listeners |
 
 Options are validated when the queue is constructed. `maxSize` and `concurrency` must be integers ≥ 1 (or `Infinity`), `maxRetries` an integer ≥ 0, `maxDeadLetterSize` an integer ≥ 0 (or `Infinity`), and `ttl`, `processingTimeout` and a numeric `retryDelay` finite numbers ≥ 0 (use `0`, not `Infinity`, to disable `ttl` or `processingTimeout`). Out-of-range numbers throw a `RangeError`; a callback that is not a function, or an unknown `overflowStrategy`, throws a `TypeError`.
-
----
 
 ## API Reference
 
@@ -230,7 +232,7 @@ Options are validated when the queue is constructed. `maxSize` and `concurrency`
 
 In TypeScript, `on`, `off` and `once` type each handler from this table:
 
-```typescript
+```ts
 import ProcessQueue, { type ProcessQueueEvents, type ProcessQueueOptions } from "@mdaemon/process-queue";
 
 const options: ProcessQueueOptions<Task> = { worker: async (task) => { /* ... */ } };
@@ -270,15 +272,13 @@ An exception thrown by a listener never changes queue state and never reaches th
 
 ### Iteration
 
-```typescript
+```ts
 for (const item of queue) {
   console.log(item.id);
 }
 
 const items = [...queue]; // spread operator works
 ```
-
----
 
 ## Behavior Notes
 
@@ -295,17 +295,14 @@ const items = [...queue]; // spread operator works
 - **Releasing a run does not cancel the worker.** After `checkProcessingTimeouts()`, `clear()` or `doneProcessing()` releases a worker run, the worker keeps running but its eventual result is ignored, and the freed slot is used for the next queued item. The same ID can therefore run again while the released run is still going. In manual mode the queue cannot tell runs apart: a late `doneProcessing(id)` for a released item also completes a newer run of the same ID.
 - **`deserialize` validates the whole snapshot** before restoring anything. It throws a `TypeError` for a malformed snapshot, an invalid item, or an ID repeated across `queue` and `inProcess` (the dead letter queue may repeat IDs), and a `RangeError` if `queue` exceeds `maxSize`. With a `worker`, the limit is `maxSize + concurrency` for `queue` and `inProcess` together (pending retries are serialized in `queue`), and `inProcess` may not exceed `concurrency`; in-process items are treated as interrupted and queued again at the front, and processing starts on `start()`, `resume()`, or the next `queueItem`. With a comparator, restored items are put in priority order. Restored queued items are subject to the TTL from the moment of restore, including items that were awaiting a retry. Retry counts are not serialized, so restored items start with their full retry budget. Taking items with `getNextItem()` or `processBatch()` while a worker is running can put more than `concurrency` items in process; a snapshot of that state is rejected with the same options.
 
----
+## Changelog
 
-# License
+See [CHANGELOG.md](CHANGELOG.md).
 
-Published under the [LGPL-2.1 license](https://github.com/mdaemon-technologies/process-queue/blob/main/LICENSE "LGPL-2.1 License").
+## License
 
-# Changelog #
+Published under the [LGPL-2.1](LICENSE) license.
 
-See [CHANGELOG.md](CHANGELOG.md) for release history.
-
-Published by<br/>
-<b>MDaemon Technologies, Ltd.<br/>
-**Simple Secure Email**</b><br/>
+Published by **MDaemon Technologies, Ltd.**  
+Simple Secure Email  
 [https://www.mdaemon.com](https://www.mdaemon.com)
