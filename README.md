@@ -3,7 +3,7 @@
 [![npm](https://img.shields.io/npm/v/@mdaemon/process-queue?color=blue)](https://www.npmjs.com/package/@mdaemon/process-queue)
 [![license](https://img.shields.io/npm/l/@mdaemon/process-queue?color=green)](LICENSE)
 [![node](https://img.shields.io/node/v/@mdaemon/process-queue)](https://nodejs.org)
-[![install size](https://packagephobia.com/badge?p=@mdaemon/process-queue)](https://packagephobia.com/result?p=@mdaemon/process-queue)
+[![install size](https://img.shields.io/npm/unpacked-size/@mdaemon/process-queue)](https://packagephobia.com/result?p=@mdaemon/process-queue)
 [![CI](https://github.com/mdaemon-technologies/process-queue/actions/workflows/node.js.yml/badge.svg)](https://github.com/mdaemon-technologies/process-queue/actions/workflows/node.js.yml)
 
 A lightweight, zero-dependency queue with ID-based deduplication, in-flight tracking, priority ordering, worker auto-processing, retry/DLQ, and event-driven lifecycle
