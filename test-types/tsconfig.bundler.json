@@ -1,0 +1,14 @@
+{
+  // Type-checks the bundler consumer fixture against the built declarations under bundler
+  // resolution, as consumers using Vite, webpack or esbuild do. src/consumerTypes.test.ts runs it.
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": false,
+    "target": "es2022",
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "types": []
+  },
+  "files": ["consumer.bundler.ts"]
+}

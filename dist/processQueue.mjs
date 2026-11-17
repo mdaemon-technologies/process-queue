@@ -1,1 +1,579 @@
-const e={now:()=>Date.now(),setTimeout:(e,t)=>setTimeout(e,t),clearTimeout:e=>clearTimeout(e)};class t{maxSize;_items=[];constructor(e){this.maxSize=e}add=e=>{e.forEach((e=>this._items.push(e)));const t=this._items.length-this.maxSize;t>0&&this._items.splice(0,t)};toArray=()=>[...this._items];clear=()=>{this._items.length=0}}class i{onListenerError;_listeners=new Map;_onceListeners=new Map;constructor(e){this.onListenerError=e}on=(e,t)=>{this._add(this._listeners,e,t)};once=(e,t)=>{this._add(this._onceListeners,e,t)};off=(e,t)=>{this._listeners.get(e)?.delete(t),this._onceListeners.get(e)?.delete(t)};emit=(e,...t)=>{const i=this._listeners.get(e),s=this._onceListeners.get(e),r=[...i??[]],o=[...s??[]];r.forEach((([s,r])=>{i?.get(s)===r&&this._call(e,s,t)})),o.forEach((([i,r])=>{s?.get(i)===r&&(s.delete(i),this._call(e,i,t))}))};_add=(e,t,i)=>{let s=e.get(t);s||(s=new Map,e.set(t,s)),s.has(i)||s.set(i,Symbol())};_call=(e,t,i)=>{try{t(...i)}catch(t){try{(0,this.onListenerError)(t,e)}catch{}}}}class s{processingTimeout;clock;_items=new Map;_startedAt=new Map;_runs=new Map;constructor(e,t){this.processingTimeout=e,this.clock=t}get size(){return this._items.size}has=e=>this._items.has(e);get=e=>this._items.get(e);items=()=>Array.from(this._items.values());ids=()=>Array.from(this._items.keys());start=e=>{this._items.set(e.id,e),this.processingTimeout>0&&this._startedAt.set(e.id,this.clock.now())};beginRun=e=>{const t=Symbol();return this._runs.set(e,t),t};isCurrentRun=(e,t)=>this._runs.get(e)===t;finish=e=>{this._items.delete(e),this._startedAt.delete(e),this._runs.delete(e)};clear=()=>{this._items.clear(),this._startedAt.clear(),this._runs.clear()};hasTimedOut=e=>{const t=this._startedAt.get(e);return void 0!==t&&this.clock.now()-t>this.processingTimeout};timedOut=()=>Array.from(this._startedAt.keys()).filter(this.hasTimedOut);bookkeepingSizes=()=>({inProcess:this._items.size,processingStartedAt:this._startedAt.size,activeRuns:this._runs.size})}const r=["reject","drop-oldest","drop-newest"],o={emplace:!1,maxSize:1e3,overflowStrategy:"reject",concurrency:1,maxRetries:0,maxDeadLetterSize:1e3,retryDelay:0,ttl:0,processingTimeout:0,onListenerError:(e,t)=>{console.error(`ProcessQueue: "${t}" listener threw`,e)}},n=(e,t,i,s)=>{if((!s||t!==1/0)&&(!Number.isInteger(t)||t<i))throw new RangeError(`ProcessQueue: ${e} must be an integer >= ${i}${s?" or Infinity":""}`)},h=(e,t)=>{if(!Number.isFinite(t)||t<0)throw new RangeError(`ProcessQueue: ${e} must be a finite number >= 0`)},a=(e,t)=>{if(void 0!==t&&"function"!=typeof t)throw new TypeError(`ProcessQueue: ${e} must be a function`)},c=(e,t)=>{const i="object"==typeof e&&null!==e?e:{emplace:!0===e,maxSize:t},s={emplace:i.emplace??o.emplace,maxSize:i.maxSize??o.maxSize,comparator:i.comparator,overflowStrategy:i.overflowStrategy??o.overflowStrategy,worker:i.worker,concurrency:i.concurrency??o.concurrency,maxRetries:i.maxRetries??o.maxRetries,maxDeadLetterSize:i.maxDeadLetterSize??o.maxDeadLetterSize,retryDelay:i.retryDelay??o.retryDelay,ttl:i.ttl??o.ttl,processingTimeout:i.processingTimeout??o.processingTimeout,onListenerError:i.onListenerError??o.onListenerError};return(e=>{if(n("maxSize",e.maxSize,1,!0),n("concurrency",e.concurrency,1,!0),n("maxRetries",e.maxRetries,0,!1),n("maxDeadLetterSize",e.maxDeadLetterSize,0,!0),h("ttl",e.ttl),h("processingTimeout",e.processingTimeout),"number"==typeof e.retryDelay?h("retryDelay",e.retryDelay):a("retryDelay",e.retryDelay),a("worker",e.worker),a("comparator",e.comparator),a("onListenerError",e.onListenerError),!r.includes(e.overflowStrategy))throw new TypeError(`ProcessQueue: overflowStrategy must be one of ${r.join(", ")}`)})(s),s};class u{config;_items=[];_enqueuedAt=new Map;_arrivals=new Map;_nextArrival=0;constructor(e){this.config=e}get length(){return this._items.length}toArray=()=>[...this._items];peek=()=>this._items[0];indexOf=e=>this._items.findIndex((t=>t.id===e));has=e=>this.indexOf(e)>=0;[Symbol.iterator](){let e=0;const t=this._items;return{next:()=>e<t.length?{value:t[e++],done:!1}:{value:void 0,done:!0}}}findOldestIndex=()=>{let e=-1,t=1/0;return this._items.forEach(((i,s)=>{const r=this._arrivals.get(i.id)??-1;r<t&&(t=r,e=s)})),e};put=(e,t,i)=>{let s;if(this.config.emplace&&t>=0)this._items.splice(t,1,e);else{const r=t>=0?t:i,o=this._findInsertIndex(e,r);if(r>=0){const[e]=this._items.splice(r,1);i>=0&&(s=e,this._forget(e.id))}this._items.splice(o,0,e),this._recordArrival(e.id)}return this._markEnqueued(e.id),s};insertRetry=e=>{const t=this.config.comparator?this._findInsertIndex(e,-1):0;this._items.splice(t,0,e),this._recordArrival(e.id)};take=e=>{const t=this._items.splice(0,e);return t.forEach((e=>this._forget(e.id))),t};remove=e=>{const t=this.indexOf(e);if(t<0)return;const[i]=this._items.splice(t,1);return this._forget(e),i};expire=()=>{if(this.config.ttl<=0)return[];const e=this.config.clock.now(),t=t=>{const i=this._enqueuedAt.get(t.id);return void 0!==i&&e-i>this.config.ttl},i=this._items.filter(t);if(0===i.length)return[];const s=this._items.filter((e=>!t(e)));return this._items.length=0,s.forEach((e=>this._items.push(e))),i.forEach((e=>this._forget(e.id))),i};restore=e=>{const{comparator:t}=this.config;(t?[...e].sort(t):e).forEach((e=>{this._items.push(e),this._markEnqueued(e.id)}));(this.config.emplace||this.config.comparator?e:[...e].reverse()).forEach((e=>this._recordArrival(e.id)))};clear=()=>{this._items.length=0,this._enqueuedAt.clear(),this._arrivals.clear()};bookkeepingSizes=()=>({enqueuedAt:this._enqueuedAt.size,arrivals:this._arrivals.size});_findInsertIndex=(e,t)=>{const{comparator:i,emplace:s}=this.config,r=this._items.length-(t>=0?1:0);if(!i)return s?r:0;let o=0;for(let s=0;s<this._items.length;s++)if(s!==t){if(i(e,this._items[s])<0)return o;o++}return o};_markEnqueued=e=>{this.config.ttl>0&&this._enqueuedAt.set(e,this.config.clock.now())};_recordArrival=e=>{this._arrivals.set(e,this._nextArrival++)};_forget=e=>{this._enqueuedAt.delete(e),this._arrivals.delete(e)}}class _{clock;_attempts=new Map;_pending=new Map;constructor(e){this.clock=e}attempts=e=>this._attempts.get(e)??0;setAttempts=(e,t)=>{this._attempts.set(e,t)};forget=e=>{this._attempts.delete(e)};schedule=(e,t,i,s)=>{const r=this.clock.setTimeout((()=>{this._pending.delete(t),s()}),i);this._pending.set(t,{item:e,timer:r})};isPending=e=>this._pending.has(e);get pendingCount(){return this._pending.size}pendingItems=()=>Array.from(this._pending.values(),(({item:e})=>e));cancel=e=>{const t=this._pending.get(e);if(t)return this.clock.clearTimeout(t.timer),this._pending.delete(e),this._attempts.delete(e),t.item};clear=()=>{this._pending.forEach((({timer:e})=>this.clock.clearTimeout(e))),this._pending.clear(),this._attempts.clear()};bookkeepingSizes=()=>({retryCount:this._attempts.size,pendingRetries:this._pending.size})}const l=e=>{return"object"==typeof e&&null!==e&&("string"==typeof(t=e.id)&&t.length>0||"number"==typeof t&&!Number.isNaN(t));var t},d=e=>e instanceof Error?e:new Error(String(e)),m=e=>{throw new TypeError(`ProcessQueue.deserialize: ${e}`)},g=(e,t)=>void 0===e?[]:(Array.isArray(e)||m(`data.${t} must be an array when present`),e);class p{_options;_queue;_inFlight;_retries;_deadLetters;_events;_paused=!1;_emptyReported=!0;_drainReported=!0;_idleWaiter;_autoProcessing=!1;_autoProcessAgain=!1;_overflowHandlers={reject:()=>{throw new Error("Queue size limit reached")},"drop-oldest":()=>this._queue.findOldestIndex(),"drop-newest":()=>null};constructor(r,o){const n=c(r,o);this._options=n,this._queue=new u({emplace:n.emplace,comparator:n.comparator,ttl:n.ttl,clock:e}),this._inFlight=new s(n.processingTimeout,e),this._retries=new _(e),this._deadLetters=new t(n.maxDeadLetterSize),this._events=new i(n.onListenerError)}isProcessing=e=>this._inFlight.has(e);queueItem=e=>{if(!l(e))throw new Error("Invalid queue item: must have an id property");if(this.isProcessing(e.id)||this._retries.isPending(e.id))return!1;const t=this._queue.indexOf(e.id);let i=-1;if(t<0&&this._queue.length+this._retries.pendingCount>=this._options.maxSize){const e=this._overflowHandlers[this._options.overflowStrategy]();if(null===e||e<0)return!1;i=e}const s=this._queue.put(e,t,i);return this._markWorkAdded(),s&&this._forgetDiscarded([s]),s&&this._emit("removed",s),this._emit("added",e),this._autoProcess(),!0};getNextItem=()=>{if(this._paused)return null;this._expireItems();const[e]=this._takeForProcessing(1);return e?(this._emit("processing",e),this._checkDrain(),e):null};getQueue=(e=!1)=>e?this.processBatch(this._queue.length):this._queue.toArray();processBatch=e=>{if(this._paused)return[];this._expireItems();const t=this._takeForProcessing(e);return t.length>0&&(this._emit("processing",t),this._checkDrain()),t};removeFromQueue=e=>{const t=this._removeQueued(e)??this._retries.cancel(e);return!!t&&(this._emit("removed",t),this._checkDrain(),!0)};doneProcessing=e=>{void 0!==e?Array.isArray(e)?e.forEach((e=>this._releaseIfInProcess(e))):this._releaseIfInProcess(e):(this._releaseAllInProcess(),this._emit("done")),this._checkDrain(),this._autoProcess()};length=(e,t)=>void 0!==e&&void 0!==t?this._queue.toArray().filter((i=>i[e]===t)).length:this._queue.length;clear=()=>{this._queue.clear(),this._releaseAllInProcess(),this._retries.clear(),this._checkDrain()};onIdle=()=>{if(this._isIdle())return Promise.resolve();if(!this._idleWaiter){let e;const t=new Promise((t=>{e=t}));this._idleWaiter={promise:t,resolve:e}}return this._idleWaiter.promise};isEmpty=()=>0===this._queue.length;busy=()=>this._inFlight.size>0;processSize=()=>this._inFlight.size;pause=()=>{this._paused=!0,this._emit("paused")};resume=()=>{this._paused=!1,this._emit("resumed"),this._autoProcess()};start=()=>{this.resume()};stop=()=>{this.pause()};isPaused=()=>this._paused;peek=()=>this._queue.peek()??null;has=e=>this._queue.has(e);getInProcess=()=>this._inFlight.items();queueMany=e=>e.map((e=>this.queueItem(e)));on=(e,t)=>{this._events.on(e,t)};off=(e,t)=>{this._events.off(e,t)};once=(e,t)=>{this._events.once(e,t)};checkProcessingTimeouts=()=>{this._options.processingTimeout<=0||(this._inFlight.timedOut().forEach((e=>{const t=this._inFlight.get(e);t&&this._inFlight.hasTimedOut(e)&&(this._releaseInProcess(e),this._emit("timeout",t))})),this._checkDrain(),this._autoProcess())};getDeadLetterQueue=()=>this._deadLetters.toArray();clearDeadLetterQueue=()=>{this._deadLetters.clear()};_bookkeepingSizes=()=>({...this._queue.bookkeepingSizes(),...this._inFlight.bookkeepingSizes(),...this._retries.bookkeepingSizes()});[Symbol.iterator](){return this._queue[Symbol.iterator]()}serialize=()=>({queue:[...this._retries.pendingItems(),...this._queue.toArray()],inProcess:this._inFlight.items(),deadLetterQueue:this._deadLetters.toArray()});static deserialize=(e,t)=>{const i=new p(t),{worker:s,maxSize:r,concurrency:o}=i._options,n=r+o,{queued:h,inProcess:a,deadLetters:c}=((e,t)=>{"object"==typeof e&&null!==e&&Array.isArray(e.queue)||m("data.queue must be an array");const i=e,s=i.queue,r=g(i.inProcess,"inProcess"),o=g(i.deadLetterQueue,"deadLetterQueue");[...s,...r,...o].forEach((e=>{l(e)||m("every item must be an object with a valid id")}));const n=new Set;if([...s,...r].forEach((e=>{n.has(e.id)&&m(`duplicate id ${JSON.stringify(e.id)}`),n.add(e.id)})),s.length>t.maxQueued)throw new RangeError(`ProcessQueue.deserialize: ${s.length} queued items exceed the limit of ${t.maxQueued}`);if(r.length>t.maxInProcess)throw new RangeError(`ProcessQueue.deserialize: ${r.length} in-process items exceed the limit of ${t.maxInProcess}`);const h=s.length+r.length;if(h>t.maxTotal)throw new RangeError(`ProcessQueue.deserialize: ${h} queued and in-process items exceed the limit of ${t.maxTotal}`);return{queued:s,inProcess:r,deadLetters:o}})(e,s?{maxQueued:n,maxInProcess:o,maxTotal:n}:{maxQueued:r,maxInProcess:1/0,maxTotal:1/0});return i._queue.restore(s?[...a,...h]:h),s||a.forEach((e=>i._inFlight.start(e))),i._emptyReported=0===i._queue.length,i._drainReported=i._isIdle(),i._deadLetters.add(c),i};_emit=(e,...t)=>{const[i,s]=t;this._events.emit(e,i,s)};_takeForProcessing=e=>{const t=this._queue.take(e);return t.forEach((e=>this._inFlight.start(e))),t};_removeQueued=e=>{const t=this._queue.remove(e);return t&&this._forgetDiscarded([t]),t};_forgetDiscarded=e=>{e.forEach((e=>this._retries.forget(e.id)))};_expireItems=()=>{const e=this._queue.expire();this._forgetDiscarded(e),e.forEach((e=>this._emit("expired",e))),e.length>0&&this._checkDrain()};_releaseInProcess=e=>{this._inFlight.finish(e),this._retries.forget(e)};_releaseAllInProcess=()=>{this._inFlight.ids().forEach((e=>this._retries.forget(e))),this._inFlight.clear()};_releaseIfInProcess=e=>{const t=this._inFlight.get(e);t&&(this._releaseInProcess(e),this._emit("done",t))};_checkEmpty=()=>{this._queue.length>0||this._emptyReported||(this._emptyReported=!0,this._emit("empty"))};_markWorkAdded=()=>{this._emptyReported=!1,this._drainReported=!1};_isIdle=()=>0===this._queue.length&&0===this._inFlight.size&&0===this._retries.pendingCount;_checkDrain=()=>{if(this._checkEmpty(),this._isIdle()&&!this._drainReported&&(this._drainReported=!0,this._emit("drain"),this._idleWaiter&&this._isIdle())){const e=this._idleWaiter;this._idleWaiter=void 0,e.resolve()}};_autoProcess=()=>{if(this._autoProcessing)this._autoProcessAgain=!0;else{this._autoProcessing=!0;try{do{this._autoProcessAgain=!1,this._startAvailableWork()}while(this._autoProcessAgain)}finally{this._autoProcessing=!1}}};_startAvailableWork=()=>{const e=this._options.worker;if(e&&!this._paused)for(this._expireItems();!this._paused&&this._inFlight.size<this._options.concurrency&&this._queue.length>0;){const[t]=this._takeForProcessing(1);if(!t)break;const i=t.id,s=this._inFlight.beginRun(i);if(this._emit("processing",t),this._checkEmpty(),!this._inFlight.isCurrentRun(i,s))continue;let r,o;try{r=e(t),o=!!r&&"function"==typeof r.then}catch(e){this._onWorkerFailure(t,i,s,d(e));continue}o?Promise.resolve(r).then((()=>this._onWorkerSuccess(t,i,s)),(e=>this._onWorkerFailure(t,i,s,d(e)))).catch((e=>{console.error("ProcessQueue: internal error after worker completion",e)})):this._onWorkerSuccess(t,i,s)}};_onWorkerSuccess=(e,t,i)=>{this._inFlight.isCurrentRun(t,i)&&(this._releaseInProcess(t),this._emit("done",e),this._checkDrain(),this._autoProcess())};_onWorkerFailure=(e,t,i,s)=>{this._inFlight.isCurrentRun(t,i)&&(this._inFlight.finish(t),this._handleWorkerError(e,t,s))};_handleWorkerError=(e,t,i)=>{const s=this._retries.attempts(t)+1;if(e.id!==t)return void this._failPermanently(e,t,new Error(`ProcessQueue: the worker changed the item's id from ${JSON.stringify(t)}; not retrying`),i);if(s>this._options.maxRetries)return void this._failPermanently(e,t,i,i);let r;try{r=this._retryDelayFor(s)}catch(s){return void this._failPermanently(e,t,d(s),i)}if(r>0)return this._retries.setAttempts(t,s),this._retries.schedule(e,t,r,(()=>{const i=this._requeueForRetry(e);i?this._failPermanently(e,t,i):this._autoProcess()})),this._emit("error",e,i),void this._autoProcess();const o=this._requeueForRetry(e);o?this._failPermanently(e,t,o,i):(this._retries.setAttempts(t,s),this._emit("error",e,i),this._autoProcess())};_retryDelayFor=e=>{const t=this._options.retryDelay;return(e=>{const t=Number(e);return t>0?Math.min(t,2147483647):0})("function"==typeof t?t(e):t)};_requeueForRetry=e=>{try{return this._queue.insertRetry(e),void this._markWorkAdded()}catch(e){return d(e)}};_failPermanently=(e,t,i,s)=>{this._retries.forget(t),this._deadLetters.add([e]),s&&this._emit("error",e,s),this._emit("failed",e,i),this._checkDrain(),this._autoProcess()}}export{p as default};
+// src/internal/clock.ts
+var e = {
+	now: () => Date.now(),
+	setTimeout: (e, t) => setTimeout(e, t),
+	clearTimeout: (e) => clearTimeout(e)
+}, t = 2 ** 31 - 1, n = class {
+	maxSize;
+	_items = [];
+	constructor(e) {
+		this.maxSize = e;
+	}
+	add = (e) => {
+		e.forEach((e) => this._items.push(e));
+		let t = this._items.length - this.maxSize;
+		t > 0 && this._items.splice(0, t);
+	};
+	toArray = () => [...this._items];
+	clear = () => {
+		this._items.length = 0;
+	};
+}, r = class {
+	onListenerError;
+	_listeners = /* @__PURE__ */ new Map();
+	_onceListeners = /* @__PURE__ */ new Map();
+	constructor(e) {
+		this.onListenerError = e;
+	}
+	on = (e, t) => {
+		this._add(this._listeners, e, t);
+	};
+	once = (e, t) => {
+		this._add(this._onceListeners, e, t);
+	};
+	off = (e, t) => {
+		this._listeners.get(e)?.delete(t), this._onceListeners.get(e)?.delete(t);
+	};
+	emit = (e, ...t) => {
+		let n = this._listeners.get(e), r = this._onceListeners.get(e), i = [...n ?? []], a = [...r ?? []];
+		i.forEach(([r, i]) => {
+			n?.get(r) === i && this._call(e, r, t);
+		}), a.forEach(([n, i]) => {
+			r?.get(n) === i && (r.delete(n), this._call(e, n, t));
+		});
+	};
+	_add = (e, t, n) => {
+		let r = e.get(t);
+		r || (r = /* @__PURE__ */ new Map(), e.set(t, r)), r.has(n) || r.set(n, Symbol());
+	};
+	_call = (e, t, n) => {
+		try {
+			t(...n);
+		} catch (t) {
+			try {
+				let n = this.onListenerError;
+				n(t, e);
+			} catch {}
+		}
+	};
+}, i = class {
+	processingTimeout;
+	clock;
+	_items = /* @__PURE__ */ new Map();
+	_startedAt = /* @__PURE__ */ new Map();
+	_runs = /* @__PURE__ */ new Map();
+	constructor(e, t) {
+		this.processingTimeout = e, this.clock = t;
+	}
+	get size() {
+		return this._items.size;
+	}
+	has = (e) => this._items.has(e);
+	get = (e) => this._items.get(e);
+	items = () => Array.from(this._items.values());
+	ids = () => Array.from(this._items.keys());
+	start = (e) => {
+		this._items.set(e.id, e), this.processingTimeout > 0 && this._startedAt.set(e.id, this.clock.now());
+	};
+	beginRun = (e) => {
+		let t = Symbol();
+		return this._runs.set(e, t), t;
+	};
+	isCurrentRun = (e, t) => this._runs.get(e) === t;
+	finish = (e) => {
+		this._items.delete(e), this._startedAt.delete(e), this._runs.delete(e);
+	};
+	clear = () => {
+		this._items.clear(), this._startedAt.clear(), this._runs.clear();
+	};
+	hasTimedOut = (e) => {
+		let t = this._startedAt.get(e);
+		return t !== void 0 && this.clock.now() - t > this.processingTimeout;
+	};
+	timedOut = () => Array.from(this._startedAt.keys()).filter(this.hasTimedOut);
+	bookkeepingSizes = () => ({
+		inProcess: this._items.size,
+		processingStartedAt: this._startedAt.size,
+		activeRuns: this._runs.size
+	});
+}, a = [
+	"reject",
+	"drop-oldest",
+	"drop-newest"
+], o = {
+	emplace: !1,
+	maxSize: 1e3,
+	overflowStrategy: "reject",
+	concurrency: 1,
+	maxRetries: 0,
+	maxDeadLetterSize: 1e3,
+	retryDelay: 0,
+	ttl: 0,
+	processingTimeout: 0,
+	onListenerError: (e, t) => {
+		console.error(`ProcessQueue: "${t}" listener threw`, e);
+	}
+}, s = (e, t, n, r) => {
+	if (!(r && t === Infinity) && (!Number.isInteger(t) || t < n)) throw RangeError(`ProcessQueue: ${e} must be an integer >= ${n}${r ? " or Infinity" : ""}`);
+}, c = (e, t) => {
+	if (!Number.isFinite(t) || t < 0) throw RangeError(`ProcessQueue: ${e} must be a finite number >= 0`);
+}, l = (e, t) => {
+	if (t !== void 0 && typeof t != "function") throw TypeError(`ProcessQueue: ${e} must be a function`);
+}, u = (e) => {
+	if (s("maxSize", e.maxSize, 1, !0), s("concurrency", e.concurrency, 1, !0), s("maxRetries", e.maxRetries, 0, !1), s("maxDeadLetterSize", e.maxDeadLetterSize, 0, !0), c("ttl", e.ttl), c("processingTimeout", e.processingTimeout), typeof e.retryDelay == "number" ? c("retryDelay", e.retryDelay) : l("retryDelay", e.retryDelay), l("worker", e.worker), l("comparator", e.comparator), l("onListenerError", e.onListenerError), !a.includes(e.overflowStrategy)) throw TypeError(`ProcessQueue: overflowStrategy must be one of ${a.join(", ")}`);
+}, d = (e, t) => {
+	let n = typeof e == "object" && e ? e : {
+		emplace: e === !0,
+		maxSize: t
+	}, r = {
+		emplace: n.emplace ?? o.emplace,
+		maxSize: n.maxSize ?? o.maxSize,
+		comparator: n.comparator,
+		overflowStrategy: n.overflowStrategy ?? o.overflowStrategy,
+		worker: n.worker,
+		concurrency: n.concurrency ?? o.concurrency,
+		maxRetries: n.maxRetries ?? o.maxRetries,
+		maxDeadLetterSize: n.maxDeadLetterSize ?? o.maxDeadLetterSize,
+		retryDelay: n.retryDelay ?? o.retryDelay,
+		ttl: n.ttl ?? o.ttl,
+		processingTimeout: n.processingTimeout ?? o.processingTimeout,
+		onListenerError: n.onListenerError ?? o.onListenerError
+	};
+	return u(r), r;
+}, f = class {
+	config;
+	_items = [];
+	_enqueuedAt = /* @__PURE__ */ new Map();
+	_arrivals = /* @__PURE__ */ new Map();
+	_nextArrival = 0;
+	constructor(e) {
+		this.config = e;
+	}
+	get length() {
+		return this._items.length;
+	}
+	toArray = () => [...this._items];
+	peek = () => this._items[0];
+	indexOf = (e) => this._items.findIndex((t) => t.id === e);
+	has = (e) => this.indexOf(e) >= 0;
+	[Symbol.iterator]() {
+		let e = 0, t = this._items;
+		return { next() {
+			return e < t.length ? {
+				value: t[e++],
+				done: !1
+			} : {
+				value: void 0,
+				done: !0
+			};
+		} };
+	}
+	findOldestIndex = () => {
+		let e = -1, t = Infinity;
+		return this._items.forEach((n, r) => {
+			let i = this._arrivals.get(n.id) ?? -1;
+			i < t && (t = i, e = r);
+		}), e;
+	};
+	put = (e, t, n) => {
+		let r;
+		if (this.config.emplace && t >= 0) this._items.splice(t, 1, e);
+		else {
+			let i = t >= 0 ? t : n, a = this._findInsertIndex(e, i);
+			if (i >= 0) {
+				let [e] = this._items.splice(i, 1);
+				n >= 0 && (r = e, this._forget(e.id));
+			}
+			this._items.splice(a, 0, e), this._recordArrival(e.id);
+		}
+		return this._markEnqueued(e.id), r;
+	};
+	insertRetry = (e) => {
+		let t = this.config.comparator ? this._findInsertIndex(e, -1) : 0;
+		this._items.splice(t, 0, e), this._recordArrival(e.id);
+	};
+	take = (e) => {
+		let t = this._items.splice(0, e);
+		return t.forEach((e) => this._forget(e.id)), t;
+	};
+	remove = (e) => {
+		let t = this.indexOf(e);
+		if (t < 0) return;
+		let [n] = this._items.splice(t, 1);
+		return this._forget(e), n;
+	};
+	expire = () => {
+		if (this.config.ttl <= 0) return [];
+		let e = this.config.clock.now(), t = (t) => {
+			let n = this._enqueuedAt.get(t.id);
+			return n !== void 0 && e - n > this.config.ttl;
+		}, n = this._items.filter(t);
+		if (n.length === 0) return [];
+		let r = this._items.filter((e) => !t(e));
+		return this._items.length = 0, r.forEach((e) => this._items.push(e)), n.forEach((e) => this._forget(e.id)), n;
+	};
+	restore = (e) => {
+		let { comparator: t } = this.config;
+		(t ? [...e].sort(t) : e).forEach((e) => {
+			this._items.push(e), this._markEnqueued(e.id);
+		}), (this.config.emplace || this.config.comparator ? e : [...e].reverse()).forEach((e) => this._recordArrival(e.id));
+	};
+	clear = () => {
+		this._items.length = 0, this._enqueuedAt.clear(), this._arrivals.clear();
+	};
+	bookkeepingSizes = () => ({
+		enqueuedAt: this._enqueuedAt.size,
+		arrivals: this._arrivals.size
+	});
+	_findInsertIndex = (e, t) => {
+		let { comparator: n, emplace: r } = this.config, i = this._items.length - +(t >= 0);
+		if (!n) return r ? i : 0;
+		let a = 0;
+		for (let r = 0; r < this._items.length; r++) if (r !== t) {
+			if (n(e, this._items[r]) < 0) return a;
+			a++;
+		}
+		return a;
+	};
+	_markEnqueued = (e) => {
+		this.config.ttl > 0 && this._enqueuedAt.set(e, this.config.clock.now());
+	};
+	_recordArrival = (e) => {
+		this._arrivals.set(e, this._nextArrival++);
+	};
+	_forget = (e) => {
+		this._enqueuedAt.delete(e), this._arrivals.delete(e);
+	};
+}, p = (e) => {
+	let n = Number(e);
+	return n > 0 ? Math.min(n, t) : 0;
+}, m = class {
+	clock;
+	_attempts = /* @__PURE__ */ new Map();
+	_pending = /* @__PURE__ */ new Map();
+	constructor(e) {
+		this.clock = e;
+	}
+	attempts = (e) => this._attempts.get(e) ?? 0;
+	setAttempts = (e, t) => {
+		this._attempts.set(e, t);
+	};
+	forget = (e) => {
+		this._attempts.delete(e);
+	};
+	schedule = (e, t, n, r) => {
+		let i = this.clock.setTimeout(() => {
+			this._pending.delete(t), r();
+		}, n);
+		this._pending.set(t, {
+			item: e,
+			timer: i
+		});
+	};
+	isPending = (e) => this._pending.has(e);
+	get pendingCount() {
+		return this._pending.size;
+	}
+	pendingItems = () => Array.from(this._pending.values(), ({ item: e }) => e);
+	cancel = (e) => {
+		let t = this._pending.get(e);
+		if (t) return this.clock.clearTimeout(t.timer), this._pending.delete(e), this._attempts.delete(e), t.item;
+	};
+	clear = () => {
+		this._pending.forEach(({ timer: e }) => this.clock.clearTimeout(e)), this._pending.clear(), this._attempts.clear();
+	};
+	bookkeepingSizes = () => ({
+		retryCount: this._attempts.size,
+		pendingRetries: this._pending.size
+	});
+}, h = (e) => typeof e == "string" && e.length > 0 || typeof e == "number" && !Number.isNaN(e), g = (e) => typeof e == "object" && !!e && h(e.id), _ = (e) => e instanceof Error ? e : Error(String(e)), v = (e) => {
+	throw TypeError(`ProcessQueue.deserialize: ${e}`);
+}, y = (e, t) => e === void 0 ? [] : (Array.isArray(e) || v(`data.${t} must be an array when present`), e), b = (e, t) => {
+	typeof e == "object" && e && Array.isArray(e.queue) || v("data.queue must be an array");
+	let n = e, r = n.queue, i = y(n.inProcess, "inProcess"), a = y(n.deadLetterQueue, "deadLetterQueue");
+	[
+		...r,
+		...i,
+		...a
+	].forEach((e) => {
+		g(e) || v("every item must be an object with a valid id");
+	});
+	let o = /* @__PURE__ */ new Set();
+	if ([...r, ...i].forEach((e) => {
+		o.has(e.id) && v(`duplicate id ${JSON.stringify(e.id)}`), o.add(e.id);
+	}), r.length > t.maxQueued) throw RangeError(`ProcessQueue.deserialize: ${r.length} queued items exceed the limit of ${t.maxQueued}`);
+	if (i.length > t.maxInProcess) throw RangeError(`ProcessQueue.deserialize: ${i.length} in-process items exceed the limit of ${t.maxInProcess}`);
+	let s = r.length + i.length;
+	if (s > t.maxTotal) throw RangeError(`ProcessQueue.deserialize: ${s} queued and in-process items exceed the limit of ${t.maxTotal}`);
+	return {
+		queued: r,
+		inProcess: i,
+		deadLetters: a
+	};
+}, x = class t {
+	_options;
+	_queue;
+	_inFlight;
+	_retries;
+	_deadLetters;
+	_events;
+	_paused = !1;
+	_emptyReported = !0;
+	_drainReported = !0;
+	_idleWaiter;
+	_autoProcessing = !1;
+	_autoProcessAgain = !1;
+	_overflowHandlers = {
+		reject: () => {
+			throw Error("Queue size limit reached");
+		},
+		"drop-oldest": () => this._queue.findOldestIndex(),
+		"drop-newest": () => null
+	};
+	constructor(t, a) {
+		let o = d(t, a);
+		this._options = o, this._queue = new f({
+			emplace: o.emplace,
+			comparator: o.comparator,
+			ttl: o.ttl,
+			clock: e
+		}), this._inFlight = new i(o.processingTimeout, e), this._retries = new m(e), this._deadLetters = new n(o.maxDeadLetterSize), this._events = new r(o.onListenerError);
+	}
+	isProcessing = (e) => this._inFlight.has(e);
+	queueItem = (e) => {
+		if (!g(e)) throw Error("Invalid queue item: must have an id property");
+		if (this.isProcessing(e.id) || this._retries.isPending(e.id)) return !1;
+		let t = this._queue.indexOf(e.id), n = -1;
+		if (t < 0 && this._queue.length + this._retries.pendingCount >= this._options.maxSize) {
+			let e = this._overflowHandlers[this._options.overflowStrategy]();
+			if (e === null || e < 0) return !1;
+			n = e;
+		}
+		let r = this._queue.put(e, t, n);
+		return this._markWorkAdded(), r && this._forgetDiscarded([r]), r && this._emit("removed", r), this._emit("added", e), this._autoProcess(), !0;
+	};
+	getNextItem = () => {
+		if (this._paused) return null;
+		this._expireItems();
+		let [e] = this._takeForProcessing(1);
+		return e ? (this._emit("processing", e), this._checkDrain(), e) : null;
+	};
+	getQueue = (e = !1) => e ? this.processBatch(this._queue.length) : this._queue.toArray();
+	processBatch = (e) => {
+		if (this._paused) return [];
+		this._expireItems();
+		let t = this._takeForProcessing(e);
+		return t.length > 0 && (this._emit("processing", t), this._checkDrain()), t;
+	};
+	removeFromQueue = (e) => {
+		let t = this._removeQueued(e) ?? this._retries.cancel(e);
+		return t ? (this._emit("removed", t), this._checkDrain(), !0) : !1;
+	};
+	doneProcessing = (e) => {
+		e === void 0 ? (this._releaseAllInProcess(), this._emit("done")) : Array.isArray(e) ? e.forEach((e) => this._releaseIfInProcess(e)) : this._releaseIfInProcess(e), this._checkDrain(), this._autoProcess();
+	};
+	length = (e, t) => e !== void 0 && t !== void 0 ? this._queue.toArray().filter((n) => n[e] === t).length : this._queue.length;
+	clear = () => {
+		this._queue.clear(), this._releaseAllInProcess(), this._retries.clear(), this._checkDrain();
+	};
+	onIdle = () => {
+		if (this._isIdle()) return Promise.resolve();
+		if (!this._idleWaiter) {
+			let e, t = new Promise((t) => {
+				e = t;
+			});
+			this._idleWaiter = {
+				promise: t,
+				resolve: e
+			};
+		}
+		return this._idleWaiter.promise;
+	};
+	isEmpty = () => this._queue.length === 0;
+	busy = () => this._inFlight.size > 0;
+	processSize = () => this._inFlight.size;
+	pause = () => {
+		this._paused = !0, this._emit("paused");
+	};
+	resume = () => {
+		this._paused = !1, this._emit("resumed"), this._autoProcess();
+	};
+	start = () => {
+		this.resume();
+	};
+	stop = () => {
+		this.pause();
+	};
+	isPaused = () => this._paused;
+	peek = () => this._queue.peek() ?? null;
+	has = (e) => this._queue.has(e);
+	getInProcess = () => this._inFlight.items();
+	queueMany = (e) => e.map((e) => this.queueItem(e));
+	on = (e, t) => {
+		this._events.on(e, t);
+	};
+	off = (e, t) => {
+		this._events.off(e, t);
+	};
+	once = (e, t) => {
+		this._events.once(e, t);
+	};
+	checkProcessingTimeouts = () => {
+		this._options.processingTimeout <= 0 || (this._inFlight.timedOut().forEach((e) => {
+			let t = this._inFlight.get(e);
+			t && this._inFlight.hasTimedOut(e) && (this._releaseInProcess(e), this._emit("timeout", t));
+		}), this._checkDrain(), this._autoProcess());
+	};
+	getDeadLetterQueue = () => this._deadLetters.toArray();
+	clearDeadLetterQueue = () => {
+		this._deadLetters.clear();
+	};
+	_bookkeepingSizes = () => ({
+		...this._queue.bookkeepingSizes(),
+		...this._inFlight.bookkeepingSizes(),
+		...this._retries.bookkeepingSizes()
+	});
+	[Symbol.iterator]() {
+		return this._queue[Symbol.iterator]();
+	}
+	serialize = () => ({
+		queue: [...this._retries.pendingItems(), ...this._queue.toArray()],
+		inProcess: this._inFlight.items(),
+		deadLetterQueue: this._deadLetters.toArray()
+	});
+	static deserialize = (e, n) => {
+		let r = new t(n), { worker: i, maxSize: a, concurrency: o } = r._options, s = a + o, { queued: c, inProcess: l, deadLetters: u } = b(e, i ? {
+			maxQueued: s,
+			maxInProcess: o,
+			maxTotal: s
+		} : {
+			maxQueued: a,
+			maxInProcess: Infinity,
+			maxTotal: Infinity
+		});
+		return r._queue.restore(i ? [...l, ...c] : c), i || l.forEach((e) => r._inFlight.start(e)), r._emptyReported = r._queue.length === 0, r._drainReported = r._isIdle(), r._deadLetters.add(u), r;
+	};
+	_emit = (e, ...t) => {
+		let [n, r] = t;
+		this._events.emit(e, n, r);
+	};
+	_takeForProcessing = (e) => {
+		let t = this._queue.take(e);
+		return t.forEach((e) => this._inFlight.start(e)), t;
+	};
+	_removeQueued = (e) => {
+		let t = this._queue.remove(e);
+		return t && this._forgetDiscarded([t]), t;
+	};
+	_forgetDiscarded = (e) => {
+		e.forEach((e) => this._retries.forget(e.id));
+	};
+	_expireItems = () => {
+		let e = this._queue.expire();
+		this._forgetDiscarded(e), e.forEach((e) => this._emit("expired", e)), e.length > 0 && this._checkDrain();
+	};
+	_releaseInProcess = (e) => {
+		this._inFlight.finish(e), this._retries.forget(e);
+	};
+	_releaseAllInProcess = () => {
+		this._inFlight.ids().forEach((e) => this._retries.forget(e)), this._inFlight.clear();
+	};
+	_releaseIfInProcess = (e) => {
+		let t = this._inFlight.get(e);
+		t && (this._releaseInProcess(e), this._emit("done", t));
+	};
+	_checkEmpty = () => {
+		this._queue.length > 0 || this._emptyReported || (this._emptyReported = !0, this._emit("empty"));
+	};
+	_markWorkAdded = () => {
+		this._emptyReported = !1, this._drainReported = !1;
+	};
+	_isIdle = () => this._queue.length === 0 && this._inFlight.size === 0 && this._retries.pendingCount === 0;
+	_checkDrain = () => {
+		if (this._checkEmpty(), this._isIdle() && !this._drainReported && (this._drainReported = !0, this._emit("drain"), this._idleWaiter && this._isIdle())) {
+			let e = this._idleWaiter;
+			this._idleWaiter = void 0, e.resolve();
+		}
+	};
+	_autoProcess = () => {
+		if (this._autoProcessing) this._autoProcessAgain = !0;
+		else {
+			this._autoProcessing = !0;
+			try {
+				do
+					this._autoProcessAgain = !1, this._startAvailableWork();
+				while (this._autoProcessAgain);
+			} finally {
+				this._autoProcessing = !1;
+			}
+		}
+	};
+	_startAvailableWork = () => {
+		let e = this._options.worker;
+		if (e && !this._paused) for (this._expireItems(); !this._paused && this._inFlight.size < this._options.concurrency && this._queue.length > 0;) {
+			let [t] = this._takeForProcessing(1);
+			if (!t) break;
+			let n = t.id, r = this._inFlight.beginRun(n);
+			if (this._emit("processing", t), this._checkEmpty(), !this._inFlight.isCurrentRun(n, r)) continue;
+			let i, a;
+			try {
+				i = e(t), a = !!i && typeof i.then == "function";
+			} catch (e) {
+				this._onWorkerFailure(t, n, r, _(e));
+				continue;
+			}
+			a ? Promise.resolve(i).then(() => this._onWorkerSuccess(t, n, r), (e) => this._onWorkerFailure(t, n, r, _(e))).catch((e) => {
+				console.error("ProcessQueue: internal error after worker completion", e);
+			}) : this._onWorkerSuccess(t, n, r);
+		}
+	};
+	_onWorkerSuccess = (e, t, n) => {
+		this._inFlight.isCurrentRun(t, n) && (this._releaseInProcess(t), this._emit("done", e), this._checkDrain(), this._autoProcess());
+	};
+	_onWorkerFailure = (e, t, n, r) => {
+		this._inFlight.isCurrentRun(t, n) && (this._inFlight.finish(t), this._handleWorkerError(e, t, r));
+	};
+	_handleWorkerError = (e, t, n) => {
+		let r = this._retries.attempts(t) + 1;
+		if (e.id !== t) {
+			this._failPermanently(e, t, /* @__PURE__ */ Error(`ProcessQueue: the worker changed the item's id from ${JSON.stringify(t)}; not retrying`), n);
+			return;
+		}
+		if (r > this._options.maxRetries) {
+			this._failPermanently(e, t, n, n);
+			return;
+		}
+		let i;
+		try {
+			i = this._retryDelayFor(r);
+		} catch (r) {
+			this._failPermanently(e, t, _(r), n);
+			return;
+		}
+		if (i > 0) {
+			this._retries.setAttempts(t, r), this._retries.schedule(e, t, i, () => {
+				let n = this._requeueForRetry(e);
+				n ? this._failPermanently(e, t, n) : this._autoProcess();
+			}), this._emit("error", e, n), this._autoProcess();
+			return;
+		}
+		let a = this._requeueForRetry(e);
+		a ? this._failPermanently(e, t, a, n) : (this._retries.setAttempts(t, r), this._emit("error", e, n), this._autoProcess());
+	};
+	_retryDelayFor = (e) => {
+		let t = this._options.retryDelay;
+		return p(typeof t == "function" ? t(e) : t);
+	};
+	_requeueForRetry = (e) => {
+		try {
+			this._queue.insertRetry(e), this._markWorkAdded();
+			return;
+		} catch (e) {
+			return _(e);
+		}
+	};
+	_failPermanently = (e, t, n, r) => {
+		this._retries.forget(t), this._deadLetters.add([e]), r && this._emit("error", e, r), this._emit("failed", e, n), this._checkDrain(), this._autoProcess();
+	};
+};
+export { x as default };

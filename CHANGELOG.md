@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.2] - 2026-11-17
+
+Build and tooling release. The public API, its types and the supported Node versions are unchanged; the bundles are rebuilt with the new toolchain.
+
+### Added
+- Consumer type fixtures (`test-types/`), type-checked by `npm test` against the built declarations through the package's `exports` map: as ES module and CommonJS code under `nodenext` resolution, and under `bundler` resolution.
+
+### Changed
+- Built with Vite 8 instead of Rollup, and tested with Vitest 5 instead of Jest. The bundles keep their names, formats and exports, and the type declarations are unchanged apart from the TypeScript 7 quote style below.
+- Minified with Vite's built-in Oxc minifier instead of terser, which is no longer a dependency. The CommonJS and UMD bundles are fully minified and about 1% smaller. As Vite does for libraries, the ES module bundle (`processQueue.mjs`) keeps its whitespace and its `/* @__PURE__ */` annotations, so bundlers can tree-shake it; it is larger before compression (19.1 KB, was 15.7 KB), and a consumer's bundler minifies it as usual.
+- Building and testing the package needs Node 22.12 or later. The package itself still supports Node 20: CI runs the full suite on Node 22, 24 and 26, and a dependency-free `node:test` smoke suite (`npm run test:smoke`) checks the bundles built on Node 24 on Node 20 too. The publish workflow publishes that same tested build, and both workflows pin their actions to commit SHAs.
+- `npm test` type-checks the source and tests with `tsc` before running Vitest, which does not type-check.
+- The type declarations are built and the source type-checked with TypeScript 7, the native compiler. The declarations are unchanged apart from quote style: `OVERFLOW_STRATEGIES` is declared as `readonly ['reject', 'drop-oldest', 'drop-newest']`, which is the same type.
+
+## [3.0.1] - 2026-09-21
+
+### Changed
+- `package.json` declares `"engines": { "node": ">=20" }`, so npm warns when installing on an older Node, and the README's Node badge reads the supported version from it.
+- README: the version, license and Node badges read from the npm registry, and a new Usage section shows ES module, CommonJS and browser (UMD) imports.
+
 ## [3.0.0] - 2026-09-18
 
 Security and robustness release, plus an internal restructure along DRY and SOLID lines. Several fixes change observable behavior, hence the major version.
@@ -137,5 +157,7 @@ Security and robustness release, plus an internal restructure along DRY and SOLI
   - Added `"rootDir": "./src"` (required by TS6 default change)
   - Added `"types": ["node", "jest"]` (required by TS6 default change)
 
+[3.0.2]: https://www.npmjs.com/package/@mdaemon/process-queue/v/3.0.2
+[3.0.1]: https://www.npmjs.com/package/@mdaemon/process-queue/v/3.0.1
 [3.0.0]: https://www.npmjs.com/package/@mdaemon/process-queue/v/3.0.0
 [2.0.0]: https://www.npmjs.com/package/@mdaemon/process-queue/v/2.0.0

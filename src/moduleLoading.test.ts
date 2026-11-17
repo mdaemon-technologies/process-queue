@@ -1,9 +1,26 @@
 import { createRequire } from 'module'
-import { resolve } from 'path'
+import { dirname, resolve } from 'path'
 import { readdirSync, readFileSync } from 'fs'
+import { fileURLToPath } from 'url'
+import { compileFunction, runInNewContext } from 'vm'
 
-const req = createRequire(__filename)
-const distDir = resolve(__dirname, '..', 'dist')
+const req = createRequire(import.meta.url)
+const distDir = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'dist')
+
+/**
+ * Loads a bundle as a CommonJS module, the way bundlers such as webpack 4 treat the UMD bundle.
+ * Node's own require() can't be used for it: the package is "type": "module", so Node loads
+ * the .js file as ESM, and package.json's "exports" sends Node's require() to the .cjs bundle.
+ */
+const loadAsCommonJs = (file: string): any => {
+  const filename = resolve(distDir, file)
+  const module = { exports: {} }
+  compileFunction(readFileSync(filename, 'utf-8'), ['module', 'exports', 'require'], { filename })(module, module.exports, req)
+  return module.exports
+}
+
+/** Loads a CommonJS-capable bundle: the .cjs bundle with require(), the UMD bundle as CommonJS */
+const load = (file: string): any => file.endsWith('.cjs') ? req(resolve(distDir, file)) : loadAsCommonJs(file)
 
 describe('Module Loading', () => {
   describe('type declarations', () => {
@@ -42,9 +59,24 @@ describe('Module Loading', () => {
   // The types declare `export default`, so TypeScript CommonJS consumers compile to require(...).default;
   // plain JavaScript uses require(...) itself. Both must be the constructor.
   test.each(['processQueue.cjs', 'processQueue.umd.js'])('%s exports the constructor as module.exports and .default', file => {
-    const exported = req(resolve(distDir, file))
+    const exported = load(file)
     expect(typeof exported).toBe('function')
     expect(exported.default).toBe(exported)
+  })
+
+  // The TypeScript source is ES modules, which are always strict; scripts are only strict when they say so
+  test.each(['processQueue.cjs', 'processQueue.umd.js'])('%s runs in strict mode', file => {
+    expect(readFileSync(resolve(distDir, file), 'utf-8')).toMatch(/["']use strict["']/)
+  })
+
+  // Browser scripts are often concatenated into one file. A "use strict" at the top of the UMD
+  // bundle would make every script after it strict, breaking sloppy-mode code it was joined with.
+  test('the UMD bundle keeps strict mode to itself when scripts are concatenated', () => {
+    const umd = readFileSync(resolve(distDir, 'processQueue.umd.js'), 'utf-8')
+    const window: Record<string, unknown> = {}
+    runInNewContext(`${umd}\n;assignedWithoutDeclaring = 1;`, window)
+    expect(typeof window.ProcessQueue).toBe('function')
+    expect(window.assignedWithoutDeclaring).toBe(1)
   })
 
   describe('CJS (require)', () => {
@@ -69,11 +101,11 @@ describe('Module Loading', () => {
     })
   })
 
-  describe('UMD (require)', () => {
+  describe('UMD (as CommonJS)', () => {
     let ProcessQueue: any
 
     beforeAll(() => {
-      ProcessQueue = req(resolve(distDir, 'processQueue.umd.js'))
+      ProcessQueue = load('processQueue.umd.js')
     })
 
     test('exports a default constructor', () => {
@@ -109,7 +141,7 @@ describe('Module Loading', () => {
       expect(content).not.toContain('require(')
     })
 
-    test('ESM source import works (via ts-jest transform)', async () => {
+    test('ESM source import works', async () => {
       // This test file itself uses ESM import of the source, proving ESM works
       const { default: ProcessQueue } = await import('./processQueue')
       const queue = new ProcessQueue()

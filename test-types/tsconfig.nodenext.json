@@ -1,0 +1,15 @@
+{
+  // Type-checks the ES module and CommonJS consumer fixtures against the built declarations
+  // under nodenext resolution, as consumers on Node do. src/consumerTypes.test.ts runs it.
+  // skipLibCheck is off so that an error inside the declarations themselves fails too.
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": false,
+    "target": "es2022",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": []
+  },
+  "files": ["consumer.mts", "consumer.cts"]
+}

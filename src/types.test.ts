@@ -1,4 +1,4 @@
-// Type-level tests: ts-jest type-checks this file, so a wrong type fails the suite.
+// Type-level tests: `npm test` type-checks this file with tsc first, so a wrong type fails the suite.
 // Each @ts-expect-error must be an error; an unused one fails too.
 import ProcessQueue, {
   EventHandler,

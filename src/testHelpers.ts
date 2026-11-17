@@ -1,4 +1,7 @@
-// Shared helpers for the test suites. Excluded from the build in tsconfig.json.
+// Shared helpers for the test suites. Excluded from the build in tsconfig.build.json.
+import type { MockInstance } from 'vitest'
+
+type ConsoleErrorSpy = MockInstance<typeof console.error>
 
 /** Waits for timers and promise callbacks scheduled within the next `ms` milliseconds */
 export const flush = (ms = 20): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
@@ -7,9 +10,9 @@ export const flush = (ms = 20): Promise<void> => new Promise(resolve => setTimeo
  * Silences console.error for each test in the enclosing describe block.
  * @returns A holder whose `spy` is the current test's console.error spy
  */
-export const silenceConsoleError = (): { spy: jest.SpyInstance } => {
-  const holder = {} as { spy: jest.SpyInstance }
-  beforeEach(() => { holder.spy = jest.spyOn(console, 'error').mockImplementation(() => {}) })
+export const silenceConsoleError = (): { spy: ConsoleErrorSpy } => {
+  const holder = {} as { spy: ConsoleErrorSpy }
+  beforeEach(() => { holder.spy = vi.spyOn(console, 'error').mockImplementation(() => {}) })
   afterEach(() => { holder.spy.mockRestore() })
   return holder
 }

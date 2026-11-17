@@ -295,6 +295,21 @@ const items = [...queue]; // spread operator works
 - **Releasing a run does not cancel the worker.** After `checkProcessingTimeouts()`, `clear()` or `doneProcessing()` releases a worker run, the worker keeps running but its eventual result is ignored, and the freed slot is used for the next queued item. The same ID can therefore run again while the released run is still going. In manual mode the queue cannot tell runs apart: a late `doneProcessing(id)` for a released item also completes a newer run of the same ID.
 - **`deserialize` validates the whole snapshot** before restoring anything. It throws a `TypeError` for a malformed snapshot, an invalid item, or an ID repeated across `queue` and `inProcess` (the dead letter queue may repeat IDs), and a `RangeError` if `queue` exceeds `maxSize`. With a `worker`, the limit is `maxSize + concurrency` for `queue` and `inProcess` together (pending retries are serialized in `queue`), and `inProcess` may not exceed `concurrency`; in-process items are treated as interrupted and queued again at the front, and processing starts on `start()`, `resume()`, or the next `queueItem`. With a comparator, restored items are put in priority order. Restored queued items are subject to the TTL from the moment of restore, including items that were awaiting a retry. Retry counts are not serialized, so restored items start with their full retry budget. Taking items with `getNextItem()` or `processBatch()` while a worker is running can put more than `concurrency` items in process; a snapshot of that state is rejected with the same options.
 
+## Development
+
+The package runs on Node 20 and later. Building and testing it needs Node 22.12 or later, because Vite and Vitest do.
+
+```bash
+npm ci
+npm run build        # Vite bundles dist/processQueue.{mjs,cjs,umd.js}; TypeScript 7's tsc writes the .d.ts files
+npm test             # tsc type-checks the source and tests, then Vitest runs src/**/*.test.ts
+npm run test:smoke   # node:test smoke checks of the three built bundles (smoke/)
+```
+
+Some tests read the built `dist/`, so run `npm run build` before `npm test` after changing the source. Among them, the fixtures in `test-types/` type-check the published declarations the way consumers use them: through the package's `exports` map, as ES module and CommonJS code under `nodenext` resolution, and under `bundler` resolution.
+
+A small `node:test` smoke suite in `smoke/` checks all three built bundles: the ES module and CommonJS bundles through the package's `exports` map, and the UMD bundle as a browser global and under a CommonJS loader. It needs no dependencies, so CI also runs it on Node 20, where the toolchain itself cannot run.
+
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md).

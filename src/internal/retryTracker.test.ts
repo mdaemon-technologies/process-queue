@@ -29,7 +29,7 @@ describe('RetryTracker', () => {
   test('a scheduled retry is pending until its timer fires', () => {
     const { clock, timers, fire } = manualClock()
     const tracker = new RetryTracker<T>(clock)
-    const onFire = jest.fn(() => expect(tracker.isPending('a')).toBe(false))
+    const onFire = vi.fn(() => expect(tracker.isPending('a')).toBe(false))
     tracker.schedule({ id: 'a' }, 'a', 100, onFire)
     expect(tracker.isPending('a')).toBe(true)
     expect(tracker.pendingItems()).toEqual([{ id: 'a' }])
@@ -43,7 +43,7 @@ describe('RetryTracker', () => {
   test('cancel stops the timer, forgets the count and returns the item', () => {
     const { clock, fire } = manualClock()
     const tracker = new RetryTracker<T>(clock)
-    const onFire = jest.fn()
+    const onFire = vi.fn()
     tracker.setAttempts('a', 1)
     tracker.schedule({ id: 'a' }, 'a', 100, onFire)
     expect(tracker.cancel('missing')).toBeUndefined()
@@ -56,7 +56,7 @@ describe('RetryTracker', () => {
   test('clear cancels every timer and forgets every count', () => {
     const { clock, fire } = manualClock()
     const tracker = new RetryTracker<T>(clock)
-    const onFire = jest.fn()
+    const onFire = vi.fn()
     tracker.setAttempts('a', 1)
     tracker.setAttempts('b', 1)
     tracker.schedule({ id: 'a' }, 'a', 100, onFire)
@@ -71,7 +71,7 @@ describe('normalizeDelay', () => {
   test.each([
     [50, 50], [0, 0], [NaN, 0], [-5, 0], ['20', 20], [undefined, 0],
     [Infinity, MAX_TIMER_DELAY], [2 ** 31, MAX_TIMER_DELAY],
-  ])('normalizes %p to %p', (raw, expected) => {
+  ])('normalizes %o to %o', (raw, expected) => {
     expect(normalizeDelay(raw)).toBe(expected)
   })
 

@@ -268,14 +268,14 @@ describe('ProcessQueue - Events', () => {
   })
 
   test('emits "added" event when item is queued', () => {
-    const handler = jest.fn()
+    const handler = vi.fn()
     queue.on('added', handler)
     queue.queueItem({ id: '1', value: 10 })
     expect(handler).toHaveBeenCalledWith({ id: '1', value: 10 }, undefined)
   })
 
   test('emits "processing" event when item is dequeued', () => {
-    const handler = jest.fn()
+    const handler = vi.fn()
     queue.on('processing', handler)
     queue.queueItem({ id: '1', value: 10 })
     queue.getNextItem()
@@ -283,7 +283,7 @@ describe('ProcessQueue - Events', () => {
   })
 
   test('emits "processing" event with batch on processBatch', () => {
-    const handler = jest.fn()
+    const handler = vi.fn()
     queue.on('processing', handler)
     queue.queueItem({ id: '1', value: 10 })
     queue.queueItem({ id: '2', value: 20 })
@@ -295,7 +295,7 @@ describe('ProcessQueue - Events', () => {
   })
 
   test('emits "done" event when doneProcessing is called', () => {
-    const handler = jest.fn()
+    const handler = vi.fn()
     queue.on('done', handler)
     queue.queueItem({ id: '1', value: 10 })
     queue.getNextItem()
@@ -304,7 +304,7 @@ describe('ProcessQueue - Events', () => {
   })
 
   test('emits "removed" event when item is removed from queue', () => {
-    const handler = jest.fn()
+    const handler = vi.fn()
     queue.on('removed', handler)
     queue.queueItem({ id: '1', value: 10 })
     queue.removeFromQueue('1')
@@ -312,7 +312,7 @@ describe('ProcessQueue - Events', () => {
   })
 
   test('emits "empty" event when queue becomes empty', () => {
-    const handler = jest.fn()
+    const handler = vi.fn()
     queue.on('empty', handler)
     queue.queueItem({ id: '1', value: 10 })
     queue.getNextItem()
@@ -320,7 +320,7 @@ describe('ProcessQueue - Events', () => {
   })
 
   test('emits "drain" when queue is empty and nothing processing', () => {
-    const handler = jest.fn()
+    const handler = vi.fn()
     queue.on('drain', handler)
     queue.queueItem({ id: '1', value: 10 })
     queue.getNextItem()
@@ -330,8 +330,8 @@ describe('ProcessQueue - Events', () => {
   })
 
   test('emits "empty" and "drain" on clear()', () => {
-    const emptyHandler = jest.fn()
-    const drainHandler = jest.fn()
+    const emptyHandler = vi.fn()
+    const drainHandler = vi.fn()
     queue.on('empty', emptyHandler)
     queue.on('drain', drainHandler)
     queue.queueItem({ id: '1', value: 10 })
@@ -341,7 +341,7 @@ describe('ProcessQueue - Events', () => {
   })
 
   test('off removes event listener', () => {
-    const handler = jest.fn()
+    const handler = vi.fn()
     queue.on('added', handler)
     queue.off('added', handler)
     queue.queueItem({ id: '1', value: 10 })
@@ -349,7 +349,7 @@ describe('ProcessQueue - Events', () => {
   })
 
   test('once fires handler only once', () => {
-    const handler = jest.fn()
+    const handler = vi.fn()
     queue.once('added', handler)
     queue.queueItem({ id: '1', value: 10 })
     queue.queueItem({ id: '2', value: 20 })
@@ -391,8 +391,8 @@ describe('ProcessQueue - Pause/Resume', () => {
   })
 
   test('pause emits paused event, resume emits resumed event', () => {
-    const pausedHandler = jest.fn()
-    const resumedHandler = jest.fn()
+    const pausedHandler = vi.fn()
+    const resumedHandler = vi.fn()
     queue.on('paused', pausedHandler)
     queue.on('resumed', resumedHandler)
     queue.pause()
@@ -557,7 +557,7 @@ describe('ProcessQueue - Worker & Concurrency', () => {
   })
 
   test('drain event fires when worker finishes all items', async () => {
-    const drainHandler = jest.fn()
+    const drainHandler = vi.fn()
     const queue = new ProcessQueue<{ id: string; value: number }>({
       worker: async () => {}
     })
@@ -589,7 +589,7 @@ describe('ProcessQueue - Retry & Dead Letter Queue', () => {
       worker: async () => { throw new Error('always fails') },
       maxRetries: 2
     })
-    const failedHandler = jest.fn()
+    const failedHandler = vi.fn()
     queue.on('failed', failedHandler)
     queue.queueItem({ id: '1', value: 10 })
     await flush(50)
@@ -666,11 +666,11 @@ describe('ProcessQueue - Retry & Dead Letter Queue', () => {
 
 describe('ProcessQueue - TTL & Processing Timeout', () => {
   beforeEach(() => {
-    jest.useFakeTimers()
+    vi.useFakeTimers()
   })
 
   afterEach(() => {
-    jest.useRealTimers()
+    vi.useRealTimers()
   })
 
   test('items expire from queue after TTL', () => {
@@ -678,7 +678,7 @@ describe('ProcessQueue - TTL & Processing Timeout', () => {
     queue.queueItem({ id: '1', value: 10 })
     expect(queue.length()).toBe(1)
 
-    jest.advanceTimersByTime(150)
+    vi.advanceTimersByTime(150)
 
     // Lazy expiration: triggered on getNextItem
     const item = queue.getNextItem()
@@ -687,12 +687,12 @@ describe('ProcessQueue - TTL & Processing Timeout', () => {
   })
 
   test('expired event is emitted for TTL-expired items', () => {
-    const expiredHandler = jest.fn()
+    const expiredHandler = vi.fn()
     const queue = new ProcessQueue<{ id: string; value: number }>({ ttl: 100 })
     queue.on('expired', expiredHandler)
     queue.queueItem({ id: '1', value: 10 })
 
-    jest.advanceTimersByTime(150)
+    vi.advanceTimersByTime(150)
     queue.getNextItem()
 
     expect(expiredHandler).toHaveBeenCalledWith({ id: '1', value: 10 }, undefined)
@@ -702,20 +702,20 @@ describe('ProcessQueue - TTL & Processing Timeout', () => {
     const queue = new ProcessQueue<{ id: string; value: number }>({ ttl: 100 })
     queue.queueItem({ id: '1', value: 10 })
 
-    jest.advanceTimersByTime(50)
+    vi.advanceTimersByTime(50)
     const item = queue.getNextItem()
     expect(item).toEqual({ id: '1', value: 10 })
   })
 
   test('checkProcessingTimeouts releases timed-out items', () => {
-    const timeoutHandler = jest.fn()
+    const timeoutHandler = vi.fn()
     const queue = new ProcessQueue<{ id: string; value: number }>({ processingTimeout: 100 })
     queue.on('timeout', timeoutHandler)
     queue.queueItem({ id: '1', value: 10 })
     queue.getNextItem()
     expect(queue.processSize()).toBe(1)
 
-    jest.advanceTimersByTime(150)
+    vi.advanceTimersByTime(150)
     queue.checkProcessingTimeouts()
 
     expect(queue.processSize()).toBe(0)
@@ -727,15 +727,15 @@ describe('ProcessQueue - TTL & Processing Timeout', () => {
     queue.queueItem({ id: '1', value: 10 })
     queue.getNextItem()
 
-    jest.advanceTimersByTime(50)
+    vi.advanceTimersByTime(50)
     queue.checkProcessingTimeouts()
 
     expect(queue.processSize()).toBe(1)
   })
 
   test('TTL works with worker auto-processing', () => {
-    jest.useRealTimers()
-    const expiredHandler = jest.fn()
+    vi.useRealTimers()
+    const expiredHandler = vi.fn()
     const queue = new ProcessQueue<{ id: string; value: number }>({
       ttl: 1,
       worker: (item) => {}

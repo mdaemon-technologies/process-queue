@@ -7,13 +7,13 @@ type Events = {
 
 describe('EventBus', () => {
   const create = () => {
-    const onListenerError = jest.fn()
+    const onListenerError = vi.fn()
     return { bus: new EventBus<Events>(onListenerError), onListenerError }
   }
 
   test('calls "on" listeners for every emit with the arguments', () => {
     const { bus } = create()
-    const handler = jest.fn()
+    const handler = vi.fn()
     bus.on('ping', handler)
     bus.emit('ping', 1)
     bus.emit('ping', 2)
@@ -22,7 +22,7 @@ describe('EventBus', () => {
 
   test('calls "once" listeners for the next emit only', () => {
     const { bus } = create()
-    const handler = jest.fn()
+    const handler = vi.fn()
     bus.once('ping', handler)
     bus.emit('ping', 1)
     bus.emit('ping', 2)
@@ -31,7 +31,7 @@ describe('EventBus', () => {
 
   test('off removes both kinds of listener', () => {
     const { bus } = create()
-    const handler = jest.fn()
+    const handler = vi.fn()
     bus.on('ping', handler)
     bus.once('ping', handler)
     bus.off('ping', handler)
@@ -41,7 +41,7 @@ describe('EventBus', () => {
 
   test('listeners added during an emit wait for the next emit', () => {
     const { bus } = create()
-    const late = jest.fn()
+    const late = vi.fn()
     bus.once('pong', () => { bus.on('pong', late); bus.once('pong', late) })
     bus.emit('pong')
     expect(late).not.toHaveBeenCalled()
@@ -53,7 +53,7 @@ describe('EventBus', () => {
     const { bus } = create()
     bus.once('pong', () => {})
     bus.emit('pong') // the event's once registry now exists
-    const late = jest.fn()
+    const late = vi.fn()
     bus.on('pong', () => bus.once('pong', late))
     bus.emit('pong')
     expect(late).not.toHaveBeenCalled()
@@ -61,7 +61,7 @@ describe('EventBus', () => {
 
   test('a listener removed and added again during an emit counts as added', () => {
     const { bus } = create()
-    const target = jest.fn()
+    const target = vi.fn()
     let readded = false
     // Registered before target, so it runs first in the emit
     bus.on('pong', () => {
@@ -79,8 +79,8 @@ describe('EventBus', () => {
 
   test('listeners removed during an emit are not called later in that emit', () => {
     const { bus } = create()
-    const removedOn = jest.fn()
-    const removedOnce = jest.fn()
+    const removedOn = vi.fn()
+    const removedOnce = vi.fn()
     bus.on('pong', () => { bus.off('pong', removedOn); bus.off('pong', removedOnce) })
     bus.on('pong', removedOn)
     bus.once('pong', removedOnce)
@@ -105,7 +105,7 @@ describe('EventBus', () => {
   test('a throwing listener is reported and does not stop the others', () => {
     const { bus, onListenerError } = create()
     const boom = new Error('listener')
-    const after = jest.fn()
+    const after = vi.fn()
     bus.on('ping', () => { throw boom })
     bus.on('ping', after)
     expect(() => bus.emit('ping', 1)).not.toThrow()

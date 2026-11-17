@@ -1,11 +1,11 @@
 import { isItemID, isValidItem, toError } from './validation'
 
 describe('isItemID', () => {
-  test.each(['a', 0, -1, 1.5, Infinity])('accepts %p', id => {
+  test.each(['a', 0, -1, 1.5, Infinity])('accepts %o', id => {
     expect(isItemID(id)).toBe(true)
   })
 
-  test.each(['', NaN, undefined, null, {}, true])('rejects %p', id => {
+  test.each(['', NaN, undefined, null, {}, true])('rejects %o', id => {
     expect(isItemID(id)).toBe(false)
   })
 })
@@ -15,7 +15,7 @@ describe('isValidItem', () => {
     expect(isValidItem({ id: 'a', extra: 1 })).toBe(true)
   })
 
-  test.each([null, undefined, 'a', 5, {}, { id: '' }, { id: NaN }])('rejects %p', item => {
+  test.each([null, undefined, 'a', 5, {}, { id: '' }, { id: NaN }])('rejects %o', item => {
     expect(isValidItem(item)).toBe(false)
   })
 })

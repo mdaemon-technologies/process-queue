@@ -31,7 +31,7 @@ describe('ProcessQueue - listener and worker exceptions', () => {
     })
 
     test('a throwing retryDelay function moves the item to the dead letter queue', async () => {
-      const failed = jest.fn()
+      const failed = vi.fn()
       const queue = new ProcessQueue<TestItem>({
         worker: async () => { throw new Error('work') },
         maxRetries: 3,
@@ -96,7 +96,7 @@ describe('ProcessQueue - listener and worker exceptions', () => {
   })
 
   test('listener errors are passed to onListenerError with the event name', () => {
-    const onListenerError = jest.fn()
+    const onListenerError = vi.fn()
     const queue = new ProcessQueue<TestItem>({ onListenerError })
     const boom = new Error('listener')
     queue.on('added', () => { throw boom })
@@ -114,7 +114,7 @@ describe('ProcessQueue - listener and worker exceptions', () => {
 
   test('a "once" listener registered during an emit waits for the next emit', () => {
     const queue = new ProcessQueue<TestItem>()
-    const second = jest.fn()
+    const second = vi.fn()
     queue.once('added', () => { queue.once('added', second) })
     queue.queueItem({ id: 'a' })
     expect(second).not.toHaveBeenCalled()
@@ -124,7 +124,7 @@ describe('ProcessQueue - listener and worker exceptions', () => {
 
   test('a throwing "once" listener still fires only once', () => {
     const queue = new ProcessQueue<TestItem>()
-    const handler = jest.fn(() => { throw new Error('listener') })
+    const handler = vi.fn(() => { throw new Error('listener') })
     queue.once('added', handler)
     queue.queueItem({ id: 'a' })
     queue.queueItem({ id: 'b' })
@@ -141,7 +141,7 @@ describe('ProcessQueue - listener and worker exceptions', () => {
 describe('ProcessQueue - stale worker runs', () => {
   test('a run that timed out cannot finish the run that replaced it', async () => {
     const { runs, worker } = controlledWorker<TestItem>()
-    const done = jest.fn()
+    const done = vi.fn()
     const queue = new ProcessQueue<TestItem>({ worker, processingTimeout: 5 })
     queue.on('done', done)
     queue.queueItem({ id: 't' })
@@ -163,7 +163,7 @@ describe('ProcessQueue - stale worker runs', () => {
 
   test('a run that timed out and then fails is not retried or dead-lettered', async () => {
     const { runs, worker } = controlledWorker<TestItem>()
-    const error = jest.fn()
+    const error = vi.fn()
     const queue = new ProcessQueue<TestItem>({ worker, processingTimeout: 5, maxRetries: 1 })
     queue.on('error', error)
     queue.queueItem({ id: 't' })
@@ -238,7 +238,7 @@ describe('ProcessQueue - pending retries', () => {
 
   test('removeFromQueue cancels a pending retry', async () => {
     const seen: string[] = []
-    const removed = jest.fn()
+    const removed = vi.fn()
     const queue = new ProcessQueue<TestItem>({ worker: failOnce(seen), maxRetries: 1, retryDelay: 30 })
     queue.on('removed', removed)
     queue.queueItem({ id: 'a' })
@@ -259,7 +259,7 @@ describe('ProcessQueue - pending retries', () => {
   })
 
   test('drain waits for pending retries', async () => {
-    const drain = jest.fn()
+    const drain = vi.fn()
     const seen: string[] = []
     const failA = failOnce(seen)
     const queue = new ProcessQueue<TestItem>({
@@ -344,7 +344,7 @@ describe('ProcessQueue - capacity', () => {
     })
 
     test('the evicted item is reported with a "removed" event', () => {
-      const removed = jest.fn()
+      const removed = vi.fn()
       const queue = new ProcessQueue<TestItem>({ maxSize: 1, overflowStrategy: 'drop-oldest' })
       queue.on('removed', removed)
       queue.queueItem({ id: 'a' })
@@ -377,7 +377,7 @@ describe('ProcessQueue - capacity', () => {
     ['drop-newest', true],
     ['drop-oldest', false],
     ['drop-oldest', true],
-  ] as const)('updating a queued id in a full queue succeeds (%s, emplace=%p)', (overflowStrategy, emplace) => {
+  ] as const)('updating a queued id in a full queue succeeds (%s, emplace=%o)', (overflowStrategy, emplace) => {
     const queue = new ProcessQueue<TestItem>({ maxSize: 2, overflowStrategy, emplace })
     queue.queueItem({ id: 'a' })
     queue.queueItem({ id: 'b' })
@@ -389,8 +389,8 @@ describe('ProcessQueue - capacity', () => {
 })
 
 describe('ProcessQueue - bookkeeping', () => {
-  beforeEach(() => { jest.useFakeTimers() })
-  afterEach(() => { jest.useRealTimers() })
+  beforeEach(() => { vi.useFakeTimers() })
+  afterEach(() => { vi.useRealTimers() })
 
   // Every per-item map must be empty once no item is queued, in flight or awaiting a retry
   const internalSizes = (queue: ProcessQueue<TestItem>) => queue._bookkeepingSizes()
@@ -399,22 +399,22 @@ describe('ProcessQueue - bookkeeping', () => {
   }
 
   test('processBatch skips expired items', () => {
-    const expired = jest.fn()
+    const expired = vi.fn()
     const queue = new ProcessQueue<TestItem>({ ttl: 100 })
     queue.on('expired', expired)
     queue.queueItem({ id: 'a' })
-    jest.advanceTimersByTime(150)
+    vi.advanceTimersByTime(150)
     expect(queue.processBatch(10)).toEqual([])
     expect(expired).toHaveBeenCalledWith({ id: 'a' }, undefined)
   })
 
   test('processBatch items are subject to the processing timeout', () => {
-    const timeout = jest.fn()
+    const timeout = vi.fn()
     const queue = new ProcessQueue<TestItem>({ processingTimeout: 100 })
     queue.on('timeout', timeout)
     queue.queueItem({ id: 'a' })
     queue.processBatch(10)
-    jest.advanceTimersByTime(150)
+    vi.advanceTimersByTime(150)
     queue.checkProcessingTimeouts()
     expect(queue.processSize()).toBe(0)
     expect(timeout).toHaveBeenCalledWith({ id: 'a' }, undefined)
@@ -428,17 +428,17 @@ describe('ProcessQueue - bookkeeping', () => {
     queue.doneProcessing()
     queue.queueMany([{ id: 'd' }, { id: 'e' }])
     queue.doneProcessing(queue.getNextItem()!.id)
-    jest.advanceTimersByTime(2000)
+    vi.advanceTimersByTime(2000)
     expect(queue.getNextItem()).toBeNull() // e expires
     queue.queueItem({ id: 'f' })
     queue.getNextItem()
-    jest.advanceTimersByTime(2000)
+    vi.advanceTimersByTime(2000)
     queue.checkProcessingTimeouts() // f times out
     expect(internalSizes(queue)).toEqual(allZero)
   })
 
   test('worker lifecycle leaves no bookkeeping behind', async () => {
-    jest.useRealTimers()
+    vi.useRealTimers()
     let calls = 0
     const queue = new ProcessQueue<TestItem>({
       ttl: 1000,
@@ -507,17 +507,17 @@ describe('ProcessQueue - item ids', () => {
     expect(queue.length()).toBe(0)
   })
 
-  test.each([0, -1, 1.5, Infinity, 'x'])('%p is accepted as an id', id => {
+  test.each([0, -1, 1.5, Infinity, 'x'])('%o is accepted as an id', id => {
     const queue = new ProcessQueue<{ id: string | number }>()
     expect(queue.queueItem({ id })).toBe(true)
   })
 
-  test.each([null, undefined, 'a', 5])('queueItem(%p) is rejected as an invalid item', item => {
+  test.each([null, undefined, 'a', 5])('queueItem(%o) is rejected as an invalid item', item => {
     const queue = new ProcessQueue<any>()
     expect(() => queue.queueItem(item)).toThrow('Invalid queue item')
   })
 
-  test.each([undefined, null, '', {}, true])('%p is rejected as an id', id => {
+  test.each([undefined, null, '', {}, true])('%o is rejected as an id', id => {
     const queue = new ProcessQueue<any>()
     expect(() => queue.queueItem({ id })).toThrow('Invalid queue item')
   })
@@ -570,18 +570,18 @@ describe('ProcessQueue - deserialize', () => {
   })
 
   describe('with fake timers', () => {
-    beforeEach(() => { jest.useFakeTimers() })
-    afterEach(() => { jest.useRealTimers() })
+    beforeEach(() => { vi.useFakeTimers() })
+    afterEach(() => { vi.useRealTimers() })
 
     test('restored items are subject to the TTL', () => {
       const queue = restore({ queue: [{ id: 'a' }] }, { ttl: 100 })()
-      jest.advanceTimersByTime(150)
+      vi.advanceTimersByTime(150)
       expect(queue.getNextItem()).toBeNull()
     })
 
     test('restored in-process items are subject to the processing timeout', () => {
       const queue = restore({ queue: [], inProcess: [{ id: 'a' }] }, { processingTimeout: 100 })()
-      jest.advanceTimersByTime(150)
+      vi.advanceTimersByTime(150)
       queue.checkProcessingTimeouts()
       expect(queue.processSize()).toBe(0)
     })
@@ -635,7 +635,7 @@ describe('ProcessQueue - review pass 1', () => {
     expect(started).toEqual(['a', 'b'])
   })
 
-  test.each([0, 20])('an "error" listener that re-queues the id does not create a duplicate (retryDelay %p)', async (retryDelay) => {
+  test.each([0, 20])('an "error" listener that re-queues the id does not create a duplicate (retryDelay %o)', async (retryDelay) => {
     const seen: string[] = []
     let failed = false
     const queue = new ProcessQueue<TestItem>({
@@ -786,7 +786,7 @@ describe('ProcessQueue - review pass 2', () => {
 
     test('a comparator that throws during a retry dead-letters the item', async () => {
       let comparatorFails = false
-      const failed = jest.fn()
+      const failed = vi.fn()
       const queue = new ProcessQueue<PItem>({
         comparator: (a, b) => { if (comparatorFails) throw new Error('cmp'); return byPriority(a, b) },
         maxRetries: 1,
@@ -804,7 +804,7 @@ describe('ProcessQueue - review pass 2', () => {
     })
   })
 
-  test.each([2 ** 31, Infinity])('a retryDelay of %p waits instead of retrying almost immediately', async (delay) => {
+  test.each([2 ** 31, Infinity])('a retryDelay of %o waits instead of retrying almost immediately', async (delay) => {
     let attempts = 0
     const queue = new ProcessQueue<TestItem>({
       maxRetries: 1,
@@ -837,7 +837,7 @@ describe('ProcessQueue - review pass 2', () => {
     })
 
     test('when the queue overflows with drop-oldest', () => {
-      const removed = jest.fn()
+      const removed = vi.fn()
       const queue = setup({ maxSize: 2, overflowStrategy: 'drop-oldest' })
       queue.on('removed', removed)
       expect(() => queue.queueItem({ id: 'c', p: 3 })).toThrow('cmp')
@@ -859,13 +859,13 @@ describe('ProcessQueue - review pass 2', () => {
   })
 
   describe('with fake timers', () => {
-    beforeEach(() => { jest.useFakeTimers() })
-    afterEach(() => { jest.useRealTimers() })
+    beforeEach(() => { vi.useFakeTimers() })
+    afterEach(() => { vi.useRealTimers() })
 
     test('an "expired" listener that clears the queue does not crash expiry', () => {
       const queue = new ProcessQueue<TestItem>({ ttl: 10 })
       queue.queueMany([{ id: 'a' }, { id: 'b' }, { id: 'c' }])
-      jest.advanceTimersByTime(20)
+      vi.advanceTimersByTime(20)
       queue.on('expired', () => queue.clear())
       expect(() => queue.getNextItem()).not.toThrow()
       expect(queue.isEmpty()).toBe(true)
@@ -875,7 +875,7 @@ describe('ProcessQueue - review pass 2', () => {
       const expired: string[] = []
       const queue = new ProcessQueue<TestItem>({ ttl: 10 })
       queue.queueMany([{ id: 'a' }, { id: 'b' }, { id: 'c' }])
-      jest.advanceTimersByTime(20)
+      vi.advanceTimersByTime(20)
       queue.on('expired', item => {
         expired.push((item as TestItem).id)
         if (expired.length === 1) queue.queueItem({ id: 'fresh' })
@@ -889,7 +889,7 @@ describe('ProcessQueue - review pass 2', () => {
 describe('ProcessQueue - review pass 3', () => {
   silenceConsoleError()
 
-  test.each([0, 1])('doneProcessing(id) from an "error" listener does not reset the retry budget (retryDelay %p)', async (retryDelay) => {
+  test.each([0, 1])('doneProcessing(id) from an "error" listener does not reset the retry budget (retryDelay %o)', async (retryDelay) => {
     let runs = 0
     const queue: ProcessQueue<TestItem> = new ProcessQueue<TestItem>({
       maxRetries: 2,
@@ -898,10 +898,14 @@ describe('ProcessQueue - review pass 3', () => {
       worker: async () => { if (++runs >= 10) queue.stop(); throw new Error('work') }
     })
     queue.on('error', item => queue.doneProcessing((item as TestItem).id))
-    // Wait for dead-lettering rather than a fixed time (timer resolution varies); the fallback bounds a regression
+    // Wait for dead-lettering rather than a fixed time (timer resolution varies); the fallback bounds a regression.
+    // The fallback is cleared afterwards, so it can't outlive the test and keep the test process alive.
     const failed = new Promise<void>(resolve => queue.once('failed', () => resolve()))
+    let fallback: ReturnType<typeof setTimeout> | undefined
+    const timedOut = new Promise<void>(resolve => { fallback = setTimeout(resolve, 1000) })
     queue.queueItem({ id: 'a' })
-    await Promise.race([failed, flush(1000)])
+    await Promise.race([failed, timedOut])
+    clearTimeout(fallback)
     expect(runs).toBe(3)
     expect(queue.getDeadLetterQueue()).toEqual([{ id: 'a' }])
   })
@@ -1083,9 +1087,9 @@ describe('ProcessQueue - refactor review pass 3', () => {
     })
   })
 
-  test.each([0, 5])('a failed item whose id the worker changed is dead-lettered, not retried (retryDelay %p)', async (retryDelay) => {
+  test.each([0, 5])('a failed item whose id the worker changed is dead-lettered, not retried (retryDelay %o)', async (retryDelay) => {
     let runs = 0
-    const failed = jest.fn()
+    const failed = vi.fn()
     const queue: ProcessQueue<TestItem> = new ProcessQueue<TestItem>({
       maxRetries: 2,
       retryDelay,
@@ -1116,7 +1120,7 @@ describe('ProcessQueue - README review', () => {
 
   describe('"empty" fires only when the queue becomes empty', () => {
     const track = (queue: ProcessQueue<any>) => {
-      const empty = jest.fn()
+      const empty = vi.fn()
       queue.on('empty', empty)
       return empty
     }
@@ -1151,16 +1155,16 @@ describe('ProcessQueue - README review', () => {
     })
 
     test('when expiry empties the queue', () => {
-      jest.useFakeTimers()
+      vi.useFakeTimers()
       try {
         const queue = new ProcessQueue<TestItem>({ ttl: 10 })
         const empty = track(queue)
         queue.queueItem({ id: 'a' })
-        jest.advanceTimersByTime(20)
+        vi.advanceTimersByTime(20)
         expect(queue.getNextItem()).toBeNull()
         expect(empty).toHaveBeenCalledTimes(1)
       } finally {
-        jest.useRealTimers()
+        vi.useRealTimers()
       }
     })
 
@@ -1176,7 +1180,7 @@ describe('ProcessQueue - README review', () => {
 
     test('an "empty" listener that calls back into the queue does not cause a second "empty"', () => {
       const queue = new ProcessQueue<TestItem>()
-      const empty = jest.fn(() => queue.doneProcessing())
+      const empty = vi.fn(() => queue.doneProcessing())
       queue.on('empty', empty)
       queue.queueItem({ id: 'a' })
       queue.getNextItem()
@@ -1192,27 +1196,27 @@ describe('ProcessQueue - README review', () => {
     })
 
     describe('with fake timers', () => {
-      beforeEach(() => { jest.useFakeTimers() })
-      afterEach(() => { jest.useRealTimers() })
+      beforeEach(() => { vi.useFakeTimers() })
+      afterEach(() => { vi.useRealTimers() })
 
       test('expiry that leaves the queue idle emits "drain" (manual mode)', () => {
         const events: string[] = []
         const queue = new ProcessQueue<TestItem>({ ttl: 10 })
         ;(['expired', 'empty', 'drain'] as const).forEach(event => queue.on(event, () => events.push(event)))
         queue.queueItem({ id: 'a' })
-        jest.advanceTimersByTime(20)
+        vi.advanceTimersByTime(20)
         queue.getNextItem()
         expect(events).toEqual(['expired', 'empty', 'drain'])
       })
 
       test('expiry that leaves the queue idle emits "drain" (worker mode)', async () => {
         const { runs, worker } = controlledWorker<TestItem>()
-        const drain = jest.fn()
+        const drain = vi.fn()
         const queue = new ProcessQueue<TestItem>({ ttl: 10, worker })
         queue.queueItem({ id: 'a' })
         queue.queueItem({ id: 'b' })
         queue.on('drain', drain)
-        jest.advanceTimersByTime(20)
+        vi.advanceTimersByTime(20)
         runs[0].resolve()
         await Promise.resolve()
         await Promise.resolve()
@@ -1224,7 +1228,7 @@ describe('ProcessQueue - README review', () => {
 
     test('a queue restored with items emits "empty" when it empties', () => {
       const queue = ProcessQueue.deserialize<TestItem>({ queue: [{ id: 'a' }] })
-      const empty = jest.fn()
+      const empty = vi.fn()
       queue.on('empty', empty)
       queue.getNextItem()
       expect(empty).toHaveBeenCalledTimes(1)
@@ -1251,7 +1255,7 @@ describe('ProcessQueue - README review', () => {
 
     test('processBatch and getQueue(true) emit "empty" when they empty the queue', () => {
       const queue = new ProcessQueue<TestItem>()
-      const empty = jest.fn()
+      const empty = vi.fn()
       queue.on('empty', empty)
       queue.queueMany([{ id: 'a' }, { id: 'b' }])
       queue.processBatch(1)
@@ -1265,7 +1269,7 @@ describe('ProcessQueue - README review', () => {
 
     test('clear() does not emit "drain" when an "empty" listener refills the queue', () => {
       const queue = new ProcessQueue<TestItem>()
-      const drain = jest.fn()
+      const drain = vi.fn()
       queue.on('drain', drain)
       queue.queueItem({ id: 'a' })
       queue.once('empty', () => { queue.queueItem({ id: 'b' }) })
@@ -1278,7 +1282,7 @@ describe('ProcessQueue - README review', () => {
 
 describe('ProcessQueue - drain once per idle period', () => {
   const trackDrain = (queue: ProcessQueue<any>) => {
-    const drain = jest.fn()
+    const drain = vi.fn()
     queue.on('drain', drain)
     return drain
   }
@@ -1319,7 +1323,7 @@ describe('ProcessQueue - drain once per idle period', () => {
 
   test('a "drain" listener that calls clear() does not trigger itself again', () => {
     const queue = new ProcessQueue<TestItem>()
-    const drain = jest.fn(() => queue.clear())
+    const drain = vi.fn(() => queue.clear())
     queue.on('drain', drain)
     queue.queueItem({ id: 'a' })
     queue.clear()
@@ -1406,7 +1410,7 @@ describe('ProcessQueue - onIdle', () => {
   })
 
   test('a restored worker queue is not idle until its work has run', async () => {
-    const drain = jest.fn()
+    const drain = vi.fn()
     const queue = ProcessQueue.deserialize<TestItem>({ queue: [{ id: 'q' }], inProcess: [{ id: 'p' }] }, { worker: () => {} })
     queue.on('drain', drain)
     const idle = settled(queue.onIdle())

@@ -5,7 +5,7 @@ type T = { id: string }
 
 const create = (processingTimeout = 0) => {
   let time = 0
-  const clock: Clock = { now: () => time, setTimeout: jest.fn(), clearTimeout: jest.fn() }
+  const clock: Clock = { now: () => time, setTimeout: vi.fn(), clearTimeout: vi.fn() }
   return { inFlight: new InFlight<T>(processingTimeout, clock), advance: (ms: number) => { time += ms } }
 }
 

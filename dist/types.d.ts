@@ -96,7 +96,7 @@ export type ListenerFor<QueueItem extends Item, E extends ProcessQueueEvent> = I
 /**
  * Overflow strategies, in the order they are listed in error messages
  */
-export declare const OVERFLOW_STRATEGIES: readonly ["reject", "drop-oldest", "drop-newest"];
+export declare const OVERFLOW_STRATEGIES: readonly ['reject', 'drop-oldest', 'drop-newest'];
 /**
  * Overflow strategy when queue is full
  */

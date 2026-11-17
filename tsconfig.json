@@ -4,16 +4,13 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "strict": true,
-    "declaration": true,
-    "stripInternal": true,
-    "declarationDir": "dist",
-    "outDir": "dist",
+    "noEmit": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-    "rootDir": "./src",
-    "types": ["node", "jest"]
+    "resolveJsonModule": true,
+    "types": ["node", "vitest/globals"]
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.test.ts", "src/testHelpers.ts", "node_modules"]
+  "include": ["src/**/*.ts", "vite.config.ts"],
+  "exclude": ["node_modules"]
 }

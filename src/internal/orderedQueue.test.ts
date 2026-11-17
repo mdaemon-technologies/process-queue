@@ -5,7 +5,7 @@ type T = { id: string; p?: number }
 
 const manualClock = () => {
   let time = 0
-  const clock: Clock = { now: () => time, setTimeout: jest.fn(), clearTimeout: jest.fn() }
+  const clock: Clock = { now: () => time, setTimeout: vi.fn(), clearTimeout: vi.fn() }
   return { clock, advance: (ms: number) => { time += ms } }
 }
 
