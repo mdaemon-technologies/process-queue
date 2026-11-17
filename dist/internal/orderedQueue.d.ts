@@ -35,6 +35,8 @@ export declare class OrderedQueue<T extends Item> {
      */
     indexOf: (id: ItemID) => number;
     has: (id: ItemID) => boolean;
+    /** When a queued item was put, for the TTL; undefined without a TTL, and for retried items */
+    enqueuedAt: (id: ItemID) => number | undefined;
     /** Iterates the live queue */
     [Symbol.iterator](): Iterator<T>;
     /**
@@ -73,11 +75,14 @@ export declare class OrderedQueue<T extends Item> {
      */
     expire: () => T[];
     /**
-     * Loads items from a snapshot, subject to the TTL from now: in comparator order when
-     * there is a comparator, otherwise in the given order
+     * Loads items from a snapshot: in comparator order when there is a comparator, otherwise
+     * in the given order. Each is subject to the TTL from its given enqueue time, or else from now,
+     * unless it is exempt.
+     * @param enqueuedAt - Enqueue times (clock time in ms) by id
+     * @param exempt - Ids exempt from the TTL, as retried items are
      * @throws Whatever the comparator throws, before anything changes
      */
-    restore: (items: readonly T[]) => void;
+    restore: (items: readonly T[], enqueuedAt?: ReadonlyMap<ItemID, number>, exempt?: ReadonlySet<ItemID>) => void;
     /** Removes every item */
     clear: () => void;
     /** Sizes of the per-item bookkeeping, for leak checks */

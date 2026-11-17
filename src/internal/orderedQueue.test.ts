@@ -112,6 +112,20 @@ describe('OrderedQueue', () => {
       expect(queue.bookkeepingSizes()).toEqual({ enqueuedAt: 1, arrivals: 1 })
     })
 
+    test('enqueuedAt reports when a queued item was put, only with a TTL', () => {
+      const { queue, add, advance } = create({ ttl: 100 })
+      advance(40)
+      add({ id: 'a' })
+      queue.insertRetry({ id: 'r' })
+      expect(queue.enqueuedAt('a')).toBe(40)
+      // Retried items are exempt from the TTL
+      expect(queue.enqueuedAt('r')).toBeUndefined()
+
+      const { queue: noTtl, add: addNoTtl } = create()
+      addNoTtl({ id: 'a' })
+      expect(noTtl.enqueuedAt('a')).toBeUndefined()
+    })
+
     test('expire does nothing without a TTL', () => {
       const { queue, add, advance } = create()
       add({ id: 'a' })
@@ -172,6 +186,24 @@ describe('OrderedQueue', () => {
       queue.restore([{ id: 'a' }])
       advance(150)
       expect(queue.expire()).toEqual([{ id: 'a' }])
+    })
+
+    test('restored items keep a given enqueue time, and the others are enqueued now', () => {
+      const { queue, advance } = create({ ttl: 100 })
+      advance(1000)
+      queue.restore([{ id: 'old' }, { id: 'new' }], new Map([['old', 950]]))
+      expect(queue.enqueuedAt('old')).toBe(950)
+      expect(queue.enqueuedAt('new')).toBe(1000)
+      advance(60)
+      expect(queue.expire()).toEqual([{ id: 'old' }])
+    })
+
+    test('restored items can be exempt from the TTL, as retried items are', () => {
+      const { queue, advance } = create({ ttl: 100 })
+      queue.restore([{ id: 'retried' }, { id: 'new' }], new Map(), new Set(['retried']))
+      expect(queue.enqueuedAt('retried')).toBeUndefined()
+      advance(150)
+      expect(queue.expire()).toEqual([{ id: 'new' }])
     })
   })
 

@@ -1,6 +1,7 @@
 import {
   Item,
   ItemID,
+  ItemState,
   ListenerFor,
   OverflowStrategy,
   ProcessQueueEvent,
@@ -450,11 +451,14 @@ class ProcessQueue<QueueItem extends Item = Item & { [key: string]: unknown }> {
    * @returns Serializable snapshot of queue state
    */
   public serialize = (): Required<Snapshot<QueueItem>> => {
+    // Items awaiting a retry re-enter at the front, so they serialize there
+    const queue = [...this._retries.pendingItems(), ...this._queue.toArray()];
+    const inProcess = this._inFlight.items();
     return {
-      // Items awaiting a retry re-enter at the front, so they serialize there
-      queue: [...this._retries.pendingItems(), ...this._queue.toArray()],
-      inProcess: this._inFlight.items(),
+      queue,
+      inProcess,
       deadLetterQueue: this._deadLetters.toArray(),
+      itemState: this._itemStates([...queue, ...inProcess]),
     };
   };
 
@@ -480,28 +484,69 @@ class ProcessQueue<QueueItem extends Item = Item & { [key: string]: unknown }> {
     // With a worker, retries may legitimately push the queue past maxSize by up to concurrency items,
     // and interrupted in-process items are queued again, so both lists share that limit
     const workerLimit = maxSize + concurrency;
-    const { queued, inProcess, deadLetters } = validateSnapshot<T>(data, worker
+    const { queued, inProcess, deadLetters, itemState } = validateSnapshot<T>(data, worker
       ? { maxQueued: workerLimit, maxInProcess: concurrency, maxTotal: workerLimit }
       : { maxQueued: maxSize, maxInProcess: Infinity, maxTotal: Infinity });
 
-    // A worker run cannot survive serialization, so its item goes back to the front of the queue
-    queue._queue.restore(worker ? [...inProcess, ...queued] : queued);
+    const retryAt = new Map<ItemID, number>();
+    const enqueuedAt = new Map<ItemID, number>();
+    // Failed attempts without an enqueue time mark a retried item, which is exempt from the TTL:
+    // queueing an item, even one with failed attempts, always records an enqueue time when there is a TTL
+    const retried = new Set<ItemID>();
+    itemState.forEach(state => {
+      if (state.retryAt !== undefined) retryAt.set(state.id, state.retryAt);
+      if (state.enqueuedAt !== undefined) enqueuedAt.set(state.id, state.enqueuedAt);
+      else if (state.attempts) retried.add(state.id);
+    });
+    const awaitingRetry = queued.filter(item => retryAt.has(item.id));
+    const ready = queued.filter(item => !retryAt.has(item.id));
+
+    // A worker run cannot survive serialization, so its item goes back to the front of the queue.
+    // The only step that can throw (the comparator), so it runs before any timer is created.
+    queue._queue.restore(worker ? [...inProcess, ...ready] : ready, enqueuedAt, retried);
     if (!worker) {
       inProcess.forEach(item => queue._inFlight.start(item));
     }
+    queue._deadLetters.add(deadLetters);
+    itemState.forEach(({ id, attempts }) => {
+      if (attempts) queue._retries.setAttempts(id, attempts);
+    });
+    const now = systemClock.now();
+    awaitingRetry.forEach(item => queue._scheduleRetry(item, item.id, normalizeDelay(retryAt.get(item.id)! - now)));
+
+    // After the retries are scheduled: items awaiting a retry keep the queue from being idle
     queue._emptyReported = queue._queue.length === 0;
     queue._drainReported = queue._isIdle();
-    queue._deadLetters.add(deadLetters);
     return queue;
   };
 
   /**
-   * Emits an event. Handlers always receive both arguments (item, error), even when
-   * the event has no payload, as they always have.
+   * The bookkeeping serialize() records, for the given items that have any
+   */
+  private _itemStates = (items: QueueItem[]): ItemState[] => {
+    const states: ItemState[] = [];
+    items.forEach(({ id }) => {
+      const attempts = this._retries.attempts(id);
+      const retryAt = this._retries.dueAt(id);
+      const enqueuedAt = this._queue.enqueuedAt(id);
+      if (attempts === 0 && retryAt === undefined && enqueuedAt === undefined) return;
+
+      const state: ItemState = { id };
+      if (attempts > 0) state.attempts = attempts;
+      if (retryAt !== undefined) state.retryAt = retryAt;
+      if (enqueuedAt !== undefined) state.enqueuedAt = enqueuedAt;
+      states.push(state);
+    });
+    return states;
+  };
+
+  /**
+   * Emits an event. Handlers always receive at least two arguments (item, error), even when
+   * the event has no payload, as they always have; any further arguments are passed on.
    */
   private _emit = <E extends ProcessQueueEvent>(event: E, ...args: Parameters<ProcessQueueEvents<QueueItem>[E]>): void => {
-    const [item, error] = args as unknown[];
-    this._events.emit(event, ...([item, error] as Parameters<ProcessQueueEvents<QueueItem>[E]>));
+    const [item, error, ...rest] = args as unknown[];
+    this._events.emit(event, ...([item, error, ...rest] as Parameters<ProcessQueueEvents<QueueItem>[E]>));
   };
 
   /**
@@ -732,15 +777,8 @@ class ProcessQueue<QueueItem extends Item = Item & { [key: string]: unknown }> {
 
     if (delay > 0) {
       this._retries.setAttempts(id, attempts);
-      this._retries.schedule(item, id, delay, () => {
-        const requeueError = this._requeueForRetry(item);
-        if (requeueError) {
-          this._failPermanently(item, id, requeueError);
-        } else {
-          this._autoProcess();
-        }
-      });
-      this._emit('error', item, err);
+      this._scheduleRetry(item, id, delay);
+      this._emit('error', item, err, { attempt: attempts, delay });
       // The failed run's slot is free while the retry waits
       this._autoProcess();
       return;
@@ -752,8 +790,23 @@ class ProcessQueue<QueueItem extends Item = Item & { [key: string]: unknown }> {
       return;
     }
     this._retries.setAttempts(id, attempts);
-    this._emit('error', item, err);
+    this._emit('error', item, err, { attempt: attempts, delay: 0 });
     this._autoProcess();
+  };
+
+  /**
+   * Holds a failed item until its retry delay passes, then puts it back in the queue,
+   * or dead-letters it if the comparator throws as it re-enters
+   */
+  private _scheduleRetry = (item: QueueItem, id: ItemID, delay: number): void => {
+    this._retries.schedule(item, id, delay, () => {
+      const requeueError = this._requeueForRetry(item);
+      if (requeueError) {
+        this._failPermanently(item, id, requeueError);
+      } else {
+        this._autoProcess();
+      }
+    });
   };
 
   /**
@@ -804,10 +857,12 @@ export type {
   EventHandler,
   Item,
   ItemID,
+  ItemState,
   ListenerFor,
   OverflowStrategy,
   ProcessQueueEvent,
   ProcessQueueEvents,
   ProcessQueueOptions,
+  RetryInfo,
   Snapshot,
 } from './types.js';

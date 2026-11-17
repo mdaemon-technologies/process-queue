@@ -18,7 +18,7 @@ export const normalizeDelay = (raw: unknown): number => {
  */
 export class RetryTracker<T extends Item> {
   private readonly _attempts = new Map<ItemID, number>();
-  private readonly _pending = new Map<ItemID, { item: T; timer: TimerHandle }>();
+  private readonly _pending = new Map<ItemID, { item: T; timer: TimerHandle; dueAt: number }>();
 
   constructor(private readonly clock: Clock) {}
 
@@ -43,10 +43,13 @@ export class RetryTracker<T extends Item> {
       this._pending.delete(id);
       onFire();
     }, delay);
-    this._pending.set(id, { item, timer });
+    this._pending.set(id, { item, timer, dueAt: this.clock.now() + delay });
   };
 
   isPending = (id: ItemID): boolean => this._pending.has(id);
+
+  /** When a pending retry is due (clock time in ms), or undefined if none is pending for the id */
+  dueAt = (id: ItemID): number | undefined => this._pending.get(id)?.dueAt;
 
   get pendingCount(): number {
     return this._pending.size;

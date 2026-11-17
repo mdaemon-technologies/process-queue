@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0] - 2026-11-17
+
+Snapshots now carry what a restored queue needs to continue exactly where the original stopped, and the `error` event says whether the item will be retried. Together they let a wrapper keep a durable log of the queue's state and rebuild it after a crash.
+
+### Added
+- The `error` event passes a third argument, `retry` (`{ attempt, delay }`), when the item will be retried: `attempt` is the number of failures so far (the value a `retryDelay` function receives) and `delay` is the wait in ms after normalizing, `0` meaning the item is already queued again. It is `undefined` when the item is about to move to the dead letter queue, including when `retryDelay` throws or the comparator throws as the item re-enters the queue. `EventHandler` gains the same optional third parameter.
+- `serialize()` returns `itemState`: for queued and in-process items that have any, the failed `attempts`, the `retryAt` of an item awaiting a retry, and the `enqueuedAt` time the TTL counts from (only with a `ttl`). Times are milliseconds since the epoch. Items awaiting a retry are still listed at the front of `queue`, so 3.0's `deserialize` reads the new snapshots as it read its own.
+- `RetryInfo` and `ItemState` type exports.
+
+### Changed
+- `deserialize` restores `itemState` when the snapshot has it:
+  - Restored items keep their failed attempts, so they only get their remaining retries. Previously every restored item started with its full retry budget.
+  - Items awaiting a retry stay reserved until their `retryAt` (re-entering on the next timer tick if it has passed), instead of being queued immediately. Like a new item, one coming due starts processing in a restored worker queue that has not been started, unless the queue is paused.
+  - Queued items are subject to the TTL from their `enqueuedAt` rather than from the moment of restore. Retried items (with `attempts` but no `enqueuedAt`, and items awaiting a retry) stay exempt from the TTL, as they are while the queue runs; previously they became subject to it from the moment of restore.
+  - Malformed `itemState` throws a `TypeError`: an entry that is not an object with a valid ID, an ID that is not queued or in process or is repeated, `attempts` that is not an integer ≥ 0, a `retryAt` or `enqueuedAt` that is not a finite number, or either one on an in-process item. Unknown fields are ignored.
+
+  Snapshots without `itemState` restore exactly as before.
+- `serialize()` is typed `Required<Snapshot<T>>` as before, so its return type now includes `itemState`. Only code that builds a `Required<Snapshot<T>>` object by hand needs to add it.
+
 ## [3.0.2] - 2026-11-17
 
 Build and tooling release. The public API, its types and the supported Node versions are unchanged; the bundles are rebuilt with the new toolchain.
@@ -158,6 +177,7 @@ Security and robustness release, plus an internal restructure along DRY and SOLI
   - Added `"rootDir": "./src"` (required by TS6 default change)
   - Added `"types": ["node", "jest"]` (required by TS6 default change)
 
+[3.1.0]: https://www.npmjs.com/package/@mdaemon/process-queue/v/3.1.0
 [3.0.2]: https://www.npmjs.com/package/@mdaemon/process-queue/v/3.0.2
 [3.0.1]: https://www.npmjs.com/package/@mdaemon/process-queue/v/3.0.1
 [3.0.0]: https://www.npmjs.com/package/@mdaemon/process-queue/v/3.0.0

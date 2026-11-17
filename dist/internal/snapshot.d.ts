@@ -1,4 +1,4 @@
-import { Item } from '../types.js';
+import { Item, ItemState } from '../types.js';
 /** Maximum list sizes a snapshot may have; Infinity for no limit */
 export interface SnapshotLimits {
     maxQueued: number;
@@ -16,4 +16,5 @@ export declare const validateSnapshot: <T extends Item>(data: unknown, limits: S
     queued: T[];
     inProcess: T[];
     deadLetters: T[];
+    itemState: ItemState[];
 };

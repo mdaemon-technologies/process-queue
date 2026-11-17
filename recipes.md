@@ -206,7 +206,8 @@ process.on("SIGTERM", async () => {
     await new Promise((r) => setTimeout(r, 100));
   }
 
-  // Queued items, items awaiting a retry, anything still in process, and the dead letter queue
+  // Queued items, items awaiting a retry, anything still in process, the dead letter queue,
+  // and each item's failed attempts, retry time and TTL start (itemState)
   await writeFile(SNAPSHOT, JSON.stringify(queue.serialize()));
   process.exit(0);
 });
@@ -214,7 +215,7 @@ process.on("SIGTERM", async () => {
 
 Don't wait with `await queue.onIdle()` here: a paused queue that still holds items never becomes idle.
 
-Work still running at the deadline is saved as in process, and `deserialize` queues it again, so it runs a second time after the restart. Make such workers idempotent.
+Work still running at the deadline is saved as in process, and `deserialize` queues it again, so it runs a second time after the restart. Make such workers idempotent. Restored items keep their failed attempts, so an item that keeps failing still reaches the dead letter queue after `maxRetries` retries in total, however many restarts happen in between.
 
 ## When to use something else
 

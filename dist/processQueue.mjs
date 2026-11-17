@@ -156,6 +156,7 @@ var e = {
 	peek = () => this._items[0];
 	indexOf = (e) => this._items.findIndex((t) => t.id === e);
 	has = (e) => this.indexOf(e) >= 0;
+	enqueuedAt = (e) => this._enqueuedAt.get(e);
 	[Symbol.iterator]() {
 		let e = 0, t = this._items;
 		return { next() {
@@ -212,10 +213,10 @@ var e = {
 		let r = this._items.filter((e) => !t(e));
 		return this._items.length = 0, r.forEach((e) => this._items.push(e)), n.forEach((e) => this._forget(e.id)), n;
 	};
-	restore = (e) => {
-		let { comparator: t } = this.config;
-		(t ? [...e].sort(t) : e).forEach((e) => {
-			this._items.push(e), this._markEnqueued(e.id);
+	restore = (e, t = /* @__PURE__ */ new Map(), n = /* @__PURE__ */ new Set()) => {
+		let { comparator: r } = this.config;
+		(r ? [...e].sort(r) : e).forEach((e) => {
+			this._items.push(e), n.has(e.id) || this._markEnqueued(e.id, t.get(e.id));
 		}), (this.config.emplace || this.config.comparator ? e : [...e].reverse()).forEach((e) => this._recordArrival(e.id));
 	};
 	clear = () => {
@@ -235,8 +236,8 @@ var e = {
 		}
 		return a;
 	};
-	_markEnqueued = (e) => {
-		this.config.ttl > 0 && this._enqueuedAt.set(e, this.config.clock.now());
+	_markEnqueued = (e, t = this.config.clock.now()) => {
+		this.config.ttl > 0 && this._enqueuedAt.set(e, t);
 	};
 	_recordArrival = (e) => {
 		this._arrivals.set(e, this._nextArrival++);
@@ -267,10 +268,12 @@ var e = {
 		}, n);
 		this._pending.set(t, {
 			item: e,
-			timer: i
+			timer: i,
+			dueAt: this.clock.now() + n
 		});
 	};
 	isPending = (e) => this._pending.has(e);
+	dueAt = (e) => this._pending.get(e)?.dueAt;
 	get pendingCount() {
 		return this._pending.size;
 	}
@@ -288,9 +291,19 @@ var e = {
 	});
 }, h = (e) => typeof e == "string" && e.length > 0 || typeof e == "number" && !Number.isNaN(e), g = (e) => typeof e == "object" && !!e && h(e.id), _ = (e) => e instanceof Error ? e : Error(String(e)), v = (e) => {
 	throw TypeError(`ProcessQueue.deserialize: ${e}`);
-}, y = (e, t) => e === void 0 ? [] : (Array.isArray(e) || v(`data.${t} must be an array when present`), e), b = (e, t) => {
+}, y = (e, t) => e === void 0 ? [] : (Array.isArray(e) || v(`data.${t} must be an array when present`), e), b = (e, t, n) => {
+	let r = /* @__PURE__ */ new Set();
+	e.forEach((e, i) => {
+		let a = `data.itemState[${i}]`;
+		g(e) || v(`${a} must be an object with a valid id`);
+		let { id: o, attempts: s, retryAt: c, enqueuedAt: l } = e;
+		n.has(o) || v(`${a}.id ${JSON.stringify(o)} is not queued or in process`), r.has(o) && v(`duplicate itemState id ${JSON.stringify(o)}`), r.add(o), s !== void 0 && !(Number.isSafeInteger(s) && s >= 0) && v(`${a}.attempts must be an integer >= 0`), [["retryAt", c], ["enqueuedAt", l]].forEach(([e, n]) => {
+			n !== void 0 && (typeof n == "number" && Number.isFinite(n) || v(`${a}.${e} must be a finite number`), t.has(o) || v(`${a}.${e} is only allowed for queued items`));
+		});
+	});
+}, x = (e, t) => {
 	typeof e == "object" && e && Array.isArray(e.queue) || v("data.queue must be an array");
-	let n = e, r = n.queue, i = y(n.inProcess, "inProcess"), a = y(n.deadLetterQueue, "deadLetterQueue");
+	let n = e, r = n.queue, i = y(n.inProcess, "inProcess"), a = y(n.deadLetterQueue, "deadLetterQueue"), o = y(n.itemState, "itemState");
 	[
 		...r,
 		...i,
@@ -298,19 +311,20 @@ var e = {
 	].forEach((e) => {
 		g(e) || v("every item must be an object with a valid id");
 	});
-	let o = /* @__PURE__ */ new Set();
+	let s = /* @__PURE__ */ new Set();
 	if ([...r, ...i].forEach((e) => {
-		o.has(e.id) && v(`duplicate id ${JSON.stringify(e.id)}`), o.add(e.id);
+		s.has(e.id) && v(`duplicate id ${JSON.stringify(e.id)}`), s.add(e.id);
 	}), r.length > t.maxQueued) throw RangeError(`ProcessQueue.deserialize: ${r.length} queued items exceed the limit of ${t.maxQueued}`);
 	if (i.length > t.maxInProcess) throw RangeError(`ProcessQueue.deserialize: ${i.length} in-process items exceed the limit of ${t.maxInProcess}`);
-	let s = r.length + i.length;
-	if (s > t.maxTotal) throw RangeError(`ProcessQueue.deserialize: ${s} queued and in-process items exceed the limit of ${t.maxTotal}`);
-	return {
+	let c = r.length + i.length;
+	if (c > t.maxTotal) throw RangeError(`ProcessQueue.deserialize: ${c} queued and in-process items exceed the limit of ${t.maxTotal}`);
+	return b(o, new Set(r.map((e) => e.id)), s), {
 		queued: r,
 		inProcess: i,
-		deadLetters: a
+		deadLetters: a,
+		itemState: o
 	};
-}, x = class t {
+}, S = class t {
 	_options;
 	_queue;
 	_inFlight;
@@ -436,26 +450,47 @@ var e = {
 	[Symbol.iterator]() {
 		return this._queue[Symbol.iterator]();
 	}
-	serialize = () => ({
-		queue: [...this._retries.pendingItems(), ...this._queue.toArray()],
-		inProcess: this._inFlight.items(),
-		deadLetterQueue: this._deadLetters.toArray()
-	});
-	static deserialize = (e, n) => {
-		let r = new t(n), { worker: i, maxSize: a, concurrency: o } = r._options, s = a + o, { queued: c, inProcess: l, deadLetters: u } = b(e, i ? {
-			maxQueued: s,
-			maxInProcess: o,
-			maxTotal: s
+	serialize = () => {
+		let e = [...this._retries.pendingItems(), ...this._queue.toArray()], t = this._inFlight.items();
+		return {
+			queue: e,
+			inProcess: t,
+			deadLetterQueue: this._deadLetters.toArray(),
+			itemState: this._itemStates([...e, ...t])
+		};
+	};
+	static deserialize = (n, r) => {
+		let i = new t(r), { worker: a, maxSize: o, concurrency: s } = i._options, c = o + s, { queued: l, inProcess: u, deadLetters: d, itemState: f } = x(n, a ? {
+			maxQueued: c,
+			maxInProcess: s,
+			maxTotal: c
 		} : {
-			maxQueued: a,
+			maxQueued: o,
 			maxInProcess: Infinity,
 			maxTotal: Infinity
+		}), m = /* @__PURE__ */ new Map(), h = /* @__PURE__ */ new Map(), g = /* @__PURE__ */ new Set();
+		f.forEach((e) => {
+			e.retryAt !== void 0 && m.set(e.id, e.retryAt), e.enqueuedAt === void 0 ? e.attempts && g.add(e.id) : h.set(e.id, e.enqueuedAt);
 		});
-		return r._queue.restore(i ? [...l, ...c] : c), i || l.forEach((e) => r._inFlight.start(e)), r._emptyReported = r._queue.length === 0, r._drainReported = r._isIdle(), r._deadLetters.add(u), r;
+		let _ = l.filter((e) => m.has(e.id)), v = l.filter((e) => !m.has(e.id));
+		i._queue.restore(a ? [...u, ...v] : v, h, g), a || u.forEach((e) => i._inFlight.start(e)), i._deadLetters.add(d), f.forEach(({ id: e, attempts: t }) => {
+			t && i._retries.setAttempts(e, t);
+		});
+		let y = e.now();
+		return _.forEach((e) => i._scheduleRetry(e, e.id, p(m.get(e.id) - y))), i._emptyReported = i._queue.length === 0, i._drainReported = i._isIdle(), i;
+	};
+	_itemStates = (e) => {
+		let t = [];
+		return e.forEach(({ id: e }) => {
+			let n = this._retries.attempts(e), r = this._retries.dueAt(e), i = this._queue.enqueuedAt(e);
+			if (n === 0 && r === void 0 && i === void 0) return;
+			let a = { id: e };
+			n > 0 && (a.attempts = n), r !== void 0 && (a.retryAt = r), i !== void 0 && (a.enqueuedAt = i), t.push(a);
+		}), t;
 	};
 	_emit = (e, ...t) => {
-		let [n, r] = t;
-		this._events.emit(e, n, r);
+		let [n, r, ...i] = t;
+		this._events.emit(e, n, r, ...i);
 	};
 	_takeForProcessing = (e) => {
 		let t = this._queue.take(e);
@@ -551,14 +586,23 @@ var e = {
 			return;
 		}
 		if (i > 0) {
-			this._retries.setAttempts(t, r), this._retries.schedule(e, t, i, () => {
-				let n = this._requeueForRetry(e);
-				n ? this._failPermanently(e, t, n) : this._autoProcess();
-			}), this._emit("error", e, n), this._autoProcess();
+			this._retries.setAttempts(t, r), this._scheduleRetry(e, t, i), this._emit("error", e, n, {
+				attempt: r,
+				delay: i
+			}), this._autoProcess();
 			return;
 		}
 		let a = this._requeueForRetry(e);
-		a ? this._failPermanently(e, t, a, n) : (this._retries.setAttempts(t, r), this._emit("error", e, n), this._autoProcess());
+		a ? this._failPermanently(e, t, a, n) : (this._retries.setAttempts(t, r), this._emit("error", e, n, {
+			attempt: r,
+			delay: 0
+		}), this._autoProcess());
+	};
+	_scheduleRetry = (e, t, n) => {
+		this._retries.schedule(e, t, n, () => {
+			let n = this._requeueForRetry(e);
+			n ? this._failPermanently(e, t, n) : this._autoProcess();
+		});
 	};
 	_retryDelayFor = (e) => {
 		let t = this._options.retryDelay;
@@ -576,4 +620,4 @@ var e = {
 		this._retries.forget(t), this._deadLetters.add([e]), r && this._emit("error", e, r), this._emit("failed", e, n), this._checkDrain(), this._autoProcess();
 	};
 };
-export { x as default };
+export { S as default };

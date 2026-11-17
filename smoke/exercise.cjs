@@ -162,12 +162,28 @@ function snapshot(ProcessQueue) {
   queue.getNextItem();
 
   const json = JSON.parse(JSON.stringify(queue.serialize()));
-  assert.deepEqual(json, { queue: [{ id: 2 }], inProcess: [{ id: 1 }], deadLetterQueue: [] });
+  assert.deepEqual(json, { queue: [{ id: 2 }], inProcess: [{ id: 1 }], deadLetterQueue: [], itemState: [] });
 
   const restored = ProcessQueue.deserialize(json, { emplace: true });
   assert.deepEqual(ids(restored.getQueue()), [2]);
   assert.equal(restored.isProcessing(1), true);
   assert.throws(() => ProcessQueue.deserialize({ queue: 'nope' }), { name: 'TypeError' });
+
+  // A pending retry keeps its attempt count and due time through JSON
+  const options = { maxRetries: 2, retryDelay: 60000 };
+  const failing = new ProcessQueue({ ...options, worker: () => { throw new Error('work'); } });
+  failing.queueItem({ id: 'r' });
+  const saved = JSON.parse(JSON.stringify(failing.serialize()));
+  failing.clear();
+  assert.equal(saved.itemState.length, 1, 'the retry is recorded');
+  assert.equal(saved.itemState[0].attempts, 1);
+  assert.equal(typeof saved.itemState[0].retryAt, 'number');
+
+  const again = ProcessQueue.deserialize(saved, options);
+  assert.equal(again.has('r'), false, 'still awaiting its retry');
+  assert.deepEqual(JSON.parse(JSON.stringify(again.serialize())), saved);
+  // Cancels the retry timer, so the process can exit
+  again.clear();
 }
 
 /** An async worker with concurrency, onIdle() and 'drain'. */

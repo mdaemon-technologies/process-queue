@@ -5,11 +5,13 @@ import type {
   EventHandler,
   Item,
   ItemID,
+  ItemState,
   ListenerFor,
   OverflowStrategy,
   ProcessQueueEvent,
   ProcessQueueEvents,
   ProcessQueueOptions,
+  RetryInfo,
   Snapshot,
 } from '@mdaemon/process-queue'
 
@@ -25,6 +27,13 @@ const idle: Promise<void> = queue.onIdle()
 
 const snapshot: Snapshot<Job> = queue.serialize()
 const restored: ProcessQueue<Job> = ProcessQueue.deserialize(snapshot, options)
+const states: ItemState[] = queue.serialize().itemState
+const durable: Snapshot<Job> = { queue: [{ id: 'a', n: 1 }], itemState: [{ id: 'a', attempts: 1, retryAt: 0, enqueuedAt: 0 }] }
+queue.on('error', (job, error, retry) => {
+  const info: RetryInfo | undefined = retry
+  const delay: number | undefined = retry?.delay
+  void job.n; void error.message; void info; void delay
+})
 
 const item: Item = { id: 1 }
 const id: ItemID = item.id
@@ -41,5 +50,9 @@ const badStrategy: OverflowStrategy = 'drop-all'
 queue.queueItem({ n: 1 })
 // @ts-expect-error a failed handler's item is a Job, whose n is a number
 queue.on('failed', job => { const notNumber: string = job.n; void notNumber })
+// @ts-expect-error attempts is a number
+const badState: ItemState = { id: 'a', attempts: '1' }
+// @ts-expect-error retry is undefined when the item is about to fail permanently
+queue.on('error', (_job, _error, retry) => { const attempt: number = retry.attempt; void attempt })
 
-export { queued, next, idle, restored, id, strategy, event, handler, listener, onError, badStrategy }
+export { queued, next, idle, restored, states, durable, id, strategy, event, handler, listener, onError, badStrategy, badState }

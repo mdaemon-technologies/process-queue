@@ -220,8 +220,12 @@ declare class ProcessQueue<QueueItem extends Item = Item & {
      */
     static deserialize: <T extends Item>(data: Snapshot<T>, options?: ProcessQueueOptions<T> | boolean) => ProcessQueue<T>;
     /**
-     * Emits an event. Handlers always receive both arguments (item, error), even when
-     * the event has no payload, as they always have.
+     * The bookkeeping serialize() records, for the given items that have any
+     */
+    private _itemStates;
+    /**
+     * Emits an event. Handlers always receive at least two arguments (item, error), even when
+     * the event has no payload, as they always have; any further arguments are passed on.
      */
     private _emit;
     /**
@@ -296,6 +300,11 @@ declare class ProcessQueue<QueueItem extends Item = Item & {
      */
     private _handleWorkerError;
     /**
+     * Holds a failed item until its retry delay passes, then puts it back in the queue,
+     * or dead-letters it if the comparator throws as it re-enters
+     */
+    private _scheduleRetry;
+    /**
      * The delay before retrying an item, in ms
      * @param attempt - The attempt that just failed, starting at 1
      * @throws If the retryDelay function throws or returns a value that cannot be converted to a number
@@ -317,4 +326,4 @@ declare class ProcessQueue<QueueItem extends Item = Item & {
     private _failPermanently;
 }
 export default ProcessQueue;
-export type { EventHandler, Item, ItemID, ListenerFor, OverflowStrategy, ProcessQueueEvent, ProcessQueueEvents, ProcessQueueOptions, Snapshot, } from './types.js';
+export type { EventHandler, Item, ItemID, ItemState, ListenerFor, OverflowStrategy, ProcessQueueEvent, ProcessQueueEvents, ProcessQueueOptions, RetryInfo, Snapshot, } from './types.js';

@@ -9,6 +9,7 @@ import ProcessQueue, {
   ProcessQueueEvent,
   ProcessQueueEvents,
   ProcessQueueOptions,
+  RetryInfo,
   Snapshot,
 } from './processQueue'
 
@@ -53,6 +54,21 @@ describe('public types', () => {
     forward('added', legacy)
 
     expect(events.length).toBe(12)
+  })
+
+  test("'error' handlers receive the scheduled retry, if any", () => {
+    const queue = new ProcessQueue<Job>()
+    queue.on('error', (item, error, retry) => {
+      const info: RetryInfo | undefined = retry
+      // @ts-expect-error retry is undefined when the item is about to fail permanently
+      const attempt: number = retry.attempt
+      void item.n; void error.message; void info; void attempt
+    })
+    // EventHandler accepts the same third argument
+    const legacy: EventHandler<Job> = (_item, _error, retry) => { const delay: number | undefined = retry?.delay; void delay }
+    queue.on('error', legacy)
+
+    expect(true).toBe(true)
   })
 
   test('mistakes are type errors', () => {

@@ -26,6 +26,20 @@ describe('RetryTracker', () => {
     expect(tracker.attempts('a')).toBe(0)
   })
 
+  test('records when each pending retry is due, until it fires or is cancelled', () => {
+    const { clock, fire } = manualClock()
+    clock.now = () => 5000
+    const tracker = new RetryTracker<T>(clock)
+    tracker.schedule({ id: 'a' }, 'a', 100, () => {})
+    tracker.schedule({ id: 'b' }, 'b', 250, () => {})
+    expect(tracker.dueAt('a')).toBe(5100)
+    expect(tracker.dueAt('b')).toBe(5250)
+    tracker.cancel('b')
+    expect(tracker.dueAt('b')).toBeUndefined()
+    fire()
+    expect(tracker.dueAt('a')).toBeUndefined()
+  })
+
   test('a scheduled retry is pending until its timer fires', () => {
     const { clock, timers, fire } = manualClock()
     const tracker = new RetryTracker<T>(clock)

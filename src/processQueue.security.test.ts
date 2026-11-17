@@ -942,7 +942,10 @@ describe('ProcessQueue - review pass 3', () => {
     queue.clear()
     expect(snapshot.queue.length).toBe(3)
     const restored = ProcessQueue.deserialize<TestItem>(snapshot, options)
-    expect(restored.getQueue().map(i => i.id).sort()).toEqual(['a', 'b', 'c'])
+    // 'a' is restored awaiting its retry, so it is serialized but not yet queued
+    expect(restored.getQueue().map(i => i.id).sort()).toEqual(['b', 'c'])
+    expect(restored.serialize().queue.map(i => i.id).sort()).toEqual(['a', 'b', 'c'])
+    restored.clear()
   })
 
   test('deserialize still bounds a worker queue at maxSize plus concurrency', () => {

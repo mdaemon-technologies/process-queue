@@ -1,7 +1,7 @@
 // A CommonJS consumer. Its require() resolves to dist/processQueue.cjs, whose module.exports
 // is the constructor and also carries it as .default, which is what the declarations' default export says.
 import processQueue = require('@mdaemon/process-queue')
-import type { ItemID, OverflowStrategy, ProcessQueueOptions, Snapshot } from '@mdaemon/process-queue'
+import type { ItemID, ItemState, OverflowStrategy, ProcessQueueOptions, RetryInfo, Snapshot } from '@mdaemon/process-queue'
 
 const ProcessQueue = processQueue.default
 
@@ -14,6 +14,8 @@ queue.on('added', job => { const n: number = job.n; void n })
 const snapshot: Snapshot<Job> = queue.serialize()
 const restored = ProcessQueue.deserialize(snapshot)
 const id: ItemID = 'a'
+const states: ItemState[] = queue.serialize().itemState
+queue.on('error', (job, _error, retry) => { const info: RetryInfo | undefined = retry; void job.n; void info })
 
 // These must stay errors, so the declarations cannot silently decay to `any`.
 // @ts-expect-error not an overflow strategy
@@ -21,4 +23,4 @@ const badStrategy: OverflowStrategy = 'drop-all'
 // @ts-expect-error items need an id
 queue.queueItem({ n: 1 })
 
-export { queued, restored, id, badStrategy }
+export { queued, restored, id, states, badStrategy }

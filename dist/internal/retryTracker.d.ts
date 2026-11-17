@@ -27,6 +27,8 @@ export declare class RetryTracker<T extends Item> {
      */
     schedule: (item: T, id: ItemID, delay: number, onFire: () => void) => void;
     isPending: (id: ItemID) => boolean;
+    /** When a pending retry is due (clock time in ms), or undefined if none is pending for the id */
+    dueAt: (id: ItemID) => number | undefined;
     get pendingCount(): number;
     /** The items awaiting a retry, in the order they were scheduled */
     pendingItems: () => T[];

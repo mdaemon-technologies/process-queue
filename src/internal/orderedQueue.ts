@@ -45,6 +45,9 @@ export class OrderedQueue<T extends Item> {
 
   has = (id: ItemID): boolean => this.indexOf(id) >= 0;
 
+  /** When a queued item was put, for the TTL; undefined without a TTL, and for retried items */
+  enqueuedAt = (id: ItemID): number | undefined => this._enqueuedAt.get(id);
+
   /** Iterates the live queue */
   [Symbol.iterator](): Iterator<T> {
     let index = 0;
@@ -164,16 +167,23 @@ export class OrderedQueue<T extends Item> {
   };
 
   /**
-   * Loads items from a snapshot, subject to the TTL from now: in comparator order when
-   * there is a comparator, otherwise in the given order
+   * Loads items from a snapshot: in comparator order when there is a comparator, otherwise
+   * in the given order. Each is subject to the TTL from its given enqueue time, or else from now,
+   * unless it is exempt.
+   * @param enqueuedAt - Enqueue times (clock time in ms) by id
+   * @param exempt - Ids exempt from the TTL, as retried items are
    * @throws Whatever the comparator throws, before anything changes
    */
-  restore = (items: readonly T[]): void => {
+  restore = (
+    items: readonly T[],
+    enqueuedAt: ReadonlyMap<ItemID, number> = new Map(),
+    exempt: ReadonlySet<ItemID> = new Set()
+  ): void => {
     const { comparator } = this.config;
     const ordered = comparator ? [...items].sort(comparator) : items;
     ordered.forEach(item => {
       this._items.push(item);
-      this._markEnqueued(item.id);
+      if (!exempt.has(item.id)) this._markEnqueued(item.id, enqueuedAt.get(item.id));
     });
     // Default mode keeps the newest arrival at the front; emplace and comparator modes keep the oldest there
     const byArrival = this.config.emplace || this.config.comparator ? items : [...items].reverse();
@@ -215,8 +225,8 @@ export class OrderedQueue<T extends Item> {
     return position;
   };
 
-  private _markEnqueued = (id: ItemID): void => {
-    if (this.config.ttl > 0) this._enqueuedAt.set(id, this.config.clock.now());
+  private _markEnqueued = (id: ItemID, at: number = this.config.clock.now()): void => {
+    if (this.config.ttl > 0) this._enqueuedAt.set(id, at);
   };
 
   private _recordArrival = (id: ItemID): void => {

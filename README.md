@@ -228,7 +228,7 @@ Options are validated when the queue is constructed. `maxSize` and `concurrency`
 | `removed` | `(item)` | An item was removed or evicted |
 | `expired` | `(item)` | An item's TTL passed before it was processed |
 | `timeout` | `(item)` | `checkProcessingTimeouts()` released an item |
-| `error` | `(item, error)` | The worker failed on an item |
+| `error` | `(item, error, retry?)` | The worker failed on an item. `retry` (`{ attempt, delay }`) is set when the item will be retried: `attempt` counts the failures so far and `delay` is the wait in ms (`0` means it is already queued again). It is `undefined` when the item is about to move to the dead letter queue |
 | `failed` | `(item, error)` | An item moved to the dead letter queue; `error` is the final cause |
 | `empty` | `()` | The queue became empty (once each time it empties; with a worker, when the worker takes the last item) |
 | `drain` | `()` | The queue became idle: empty, with nothing in process or awaiting a retry (once each time it becomes idle) |
@@ -248,7 +248,7 @@ const onAdded: ProcessQueueEvents<Task>["added"] = (task) => console.log(task.id
 queue.on("added", onAdded);
 ```
 
-The package also exports the `Item`, `ItemID`, `OverflowStrategy`, `ProcessQueueEvent`, `Snapshot` and `EventHandler` types. With an event name held in a variable, `on`, `off` and `once` accept an `EventHandler`.
+The package also exports the `Item`, `ItemID`, `ItemState`, `OverflowStrategy`, `ProcessQueueEvent`, `RetryInfo`, `Snapshot` and `EventHandler` types. With an event name held in a variable, `on`, `off` and `once` accept an `EventHandler`.
 
 A listener added during an emit is first called on the next emit; a listener removed during an emit is not called again, even later in that emit.
 
@@ -271,8 +271,19 @@ An exception thrown by a listener never changes queue state and never reaches th
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `serialize()` | `{ queue, inProcess, deadLetterQueue }` | Export state |
+| `serialize()` | `{ queue, inProcess, deadLetterQueue, itemState }` | Export state |
 | `ProcessQueue.deserialize(data, options?)` | `ProcessQueue<T>` | Restore from snapshot |
+
+`itemState` lists, for queued and in-process items that have any, the bookkeeping a restored queue needs to carry on where the original left off:
+
+| Field | Meaning |
+|-------|---------|
+| `id` | The item's ID |
+| `attempts` | Failed worker attempts so far, so a restored item only gets its remaining retries |
+| `retryAt` | When an item awaiting a retry re-enters the queue |
+| `enqueuedAt` | When the item was queued, so the TTL counts from then (only with a `ttl`) |
+
+Times are milliseconds since the epoch, from the clock of the machine that called `serialize()`. A snapshot is plain data, so it can be saved as JSON. Snapshots without `itemState`, such as those made by earlier versions, still restore as before.
 
 ### Iteration
 
@@ -291,13 +302,13 @@ const items = [...queue]; // spread operator works
 - **`empty` and `drain`.** `empty` fires once each time the queue goes from having items to having none, so `clear()` on an already-empty queue does not emit it. A retry re-enters the queue, so `empty` fires again when the retry is taken. If a listener refills the queue before the operation that emptied it finishes (for example from `processing`), that brief empty period is not reported. `drain` fires once each time the queue becomes idle (empty, with nothing in process or awaiting a retry), whether through finished work, `clear()`, removal or expiry, unless a listener has refilled the queue. Calls on an already-idle queue, such as `checkProcessingTimeouts()`, `doneProcessing()` or `clear()`, do not emit it. To wait for idle without missing work that already finished, use `await queue.onIdle()`. It stays pending while a paused queue, or a restored worker queue that has not been started, holds items, and an item past its TTL counts as work until something takes it. It resolves after every `drain` listener has run, so if a listener queues more work, `onIdle()` keeps waiting for that work too. Code after `await queue.onIdle()` runs a moment later, so anything that queues work in between can make the queue busy again by then. Callers waiting at the same time share one promise. Don't await `onIdle()` inside the worker: the worker's own item is in process, so the queue cannot become idle until the worker returns.
 - **IDs are compared by type.** `1` and `"1"` are different IDs. If IDs come from mixed sources (JSON bodies, URL parameters), normalize them before queueing. `NaN` and empty strings are rejected.
 - **Items are returned by reference.** `getQueue()`, `peek()`, `getNextItem()`, iteration and `serialize()` return the queue's own item objects, not copies. Don't change an item's `id` while the queue holds it.
-- **Retries reserve their ID.** While an item waits out `retryDelay`, `queueItem` returns `false` for its ID, `removeFromQueue(id)` cancels the retry, and `serialize()` includes the item in `queue`. `drain` is not emitted until pending retries finish or are cancelled.
+- **Retries reserve their ID.** While an item waits out `retryDelay`, `queueItem` returns `false` for its ID, `removeFromQueue(id)` cancels the retry, and `serialize()` includes the item in `queue`, with its `retryAt` in `itemState`. `drain` is not emitted until pending retries finish or are cancelled.
 - **Retries and `maxSize`.** Items awaiting a retry count toward `maxSize`, so while they fill the queue a new item is rejected (`reject`) or dropped (`drop-oldest` and `drop-newest` alike, since there is no queued item to evict). A retried item was already admitted, so it re-enters the queue even when the queue is full: the overshoot is at most the number of items in flight. Retried items do not expire under the TTL. With a comparator it re-enters in priority order, otherwise at the front. A `retryDelay` longer than 2^31-1 ms is clamped to that.
 - **`drop-oldest` evicts the earliest arrival**, in every mode, and emits `removed` with the evicted item. An `emplace` replacement keeps its original arrival; a re-queue in default mode counts as a new arrival. Updating an item that is already queued never triggers the overflow strategy.
 - **Callbacks are called as plain functions.** `worker`, `comparator`, `retryDelay` and `onListenerError` are not called with the queue as `this`; use closures or arrow functions.
 - **Listeners run synchronously.** A listener that calls back into the queue sees its final state for that operation. The `comparator` must not call back into the queue. With a synchronous worker, a `done` listener that always re-queues the same ID is an infinite loop that never returns control, just as it would be in plain code.
 - **Releasing a run does not cancel the worker.** After `checkProcessingTimeouts()`, `clear()` or `doneProcessing()` releases a worker run, the worker keeps running but its eventual result is ignored, and the freed slot is used for the next queued item. The same ID can therefore run again while the released run is still going. In manual mode the queue cannot tell runs apart: a late `doneProcessing(id)` for a released item also completes a newer run of the same ID.
-- **`deserialize` validates the whole snapshot** before restoring anything. It throws a `TypeError` for a malformed snapshot, an invalid item, or an ID repeated across `queue` and `inProcess` (the dead letter queue may repeat IDs), and a `RangeError` if `queue` exceeds `maxSize`. With a `worker`, the limit is `maxSize + concurrency` for `queue` and `inProcess` together (pending retries are serialized in `queue`), and `inProcess` may not exceed `concurrency`; in-process items are treated as interrupted and queued again at the front, and processing starts on `start()`, `resume()`, or the next `queueItem`. With a comparator, restored items are put in priority order. Restored queued items are subject to the TTL from the moment of restore, including items that were awaiting a retry. Retry counts are not serialized, so restored items start with their full retry budget. Taking items with `getNextItem()` or `processBatch()` while a worker is running can put more than `concurrency` items in process; a snapshot of that state is rejected with the same options.
+- **`deserialize` validates the whole snapshot** before restoring anything. It throws a `TypeError` for a malformed snapshot, an invalid item, or an ID repeated across `queue` and `inProcess` (the dead letter queue may repeat IDs), and a `RangeError` if `queue` exceeds `maxSize`. With a `worker`, the limit is `maxSize + concurrency` for `queue` and `inProcess` together (pending retries are serialized in `queue`), and `inProcess` may not exceed `concurrency`; in-process items are treated as interrupted and queued again at the front, and processing starts on `start()`, `resume()`, the next `queueItem`, or when a restored retry comes due (unless the queue is paused). With a comparator, restored items are put in priority order. Restored items keep their failed attempts, items awaiting a retry wait until their `retryAt` (re-entering on the next timer tick if it has passed), and restored queued items are subject to the TTL from their `enqueuedAt`, or from the moment of restore when they have none. Retried items (those with `attempts` but no `enqueuedAt`, and items awaiting a retry) stay exempt from the TTL, as they are while the queue runs; in a snapshot without `itemState`, every restored queued item is subject to the TTL from the moment of restore. `itemState` is validated too: each entry must name a distinct queued or in-process ID, `attempts` must be an integer ≥ 0, and `retryAt` and `enqueuedAt` must be finite numbers, on queued items only; otherwise `deserialize` throws a `TypeError`. Taking items with `getNextItem()` or `processBatch()` while a worker is running can put more than `concurrency` items in process; a snapshot of that state is rejected with the same options.
 
 ## Development
 

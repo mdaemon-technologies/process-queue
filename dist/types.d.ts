@@ -20,6 +20,26 @@ export interface Snapshot<QueueItem extends Item> {
     inProcess?: QueueItem[];
     /** Permanently failed items, oldest first */
     deadLetterQueue?: QueueItem[];
+    /** Per-item bookkeeping for queued and in-process items; absent from snapshots made before 3.1.0 */
+    itemState?: ItemState[];
+}
+/**
+ * Bookkeeping a snapshot records for one queued or in-process item. Only items with
+ * something to record have an entry. Times are milliseconds since the epoch, from the
+ * clock of the machine that made the snapshot.
+ */
+export interface ItemState {
+    /** The item's id; it must be in the snapshot's queue or inProcess list */
+    id: ItemID;
+    /** Failed worker attempts so far; omitted when there are none */
+    attempts?: number;
+    /** When an item awaiting a retry re-enters the queue; only for items in the snapshot's queue list */
+    retryAt?: number;
+    /**
+     * When the item was queued, for the TTL; only for items in the snapshot's queue list, and only with a TTL.
+     * Retried items have none: an entry with attempts but no enqueuedAt is restored exempt from the TTL.
+     */
+    enqueuedAt?: number;
 }
 /**
  * Options for configuring a ProcessQueue instance
@@ -51,6 +71,15 @@ export interface ProcessQueueOptions<QueueItem extends Item> {
     onListenerError?: (error: unknown, event: ProcessQueueEvent) => void;
 }
 /**
+ * The retry the queue scheduled after a worker failure, passed with the 'error' event
+ */
+export interface RetryInfo {
+    /** Failed attempts so far, starting at 1: the value passed to a retryDelay function */
+    attempt: number;
+    /** Milliseconds until the item re-enters the queue; 0 means it is already queued */
+    delay: number;
+}
+/**
  * Handler for an event without a payload. The optional parameters let one-parameter
  * handlers written for the general EventHandler type keep compiling.
  */
@@ -71,8 +100,8 @@ export type ProcessQueueEvents<QueueItem extends Item> = {
     expired: (item: QueueItem) => void;
     /** An item was released by checkProcessingTimeouts() */
     timeout: (item: QueueItem) => void;
-    /** The worker failed on an item */
-    error: (item: QueueItem, error: Error) => void;
+    /** The worker failed on an item; retry is set when the item will be retried, and undefined when it is about to fail permanently */
+    error: (item: QueueItem, error: Error, retry?: RetryInfo) => void;
     /** An item was moved to the dead letter queue; error is the final cause */
     failed: (item: QueueItem, error: Error) => void;
     /** The queue became empty */
@@ -104,5 +133,5 @@ export type OverflowStrategy = typeof OVERFLOW_STRATEGIES[number];
 /**
  * A handler that accepts any event's arguments. Assignable to every entry of ProcessQueueEvents.
  */
-export type EventHandler<QueueItem extends Item> = (item?: QueueItem | QueueItem[], error?: Error) => void;
+export type EventHandler<QueueItem extends Item> = (item?: QueueItem | QueueItem[], error?: Error, retry?: RetryInfo) => void;
 export {};
