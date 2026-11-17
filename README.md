@@ -135,6 +135,10 @@ queue.on("failed", (task) => console.log(`Permanently failed: ${task.id}`));
 console.log(queue.getDeadLetterQueue()); // inspect failures
 ```
 
+## Recipes
+
+For production patterns, such as coalescing webhook bursts, calling rate-limited APIs, offline sync in the browser and graceful shutdown, see [recipes.md](recipes.md).
+
 ## Constructor
 
 ```ts

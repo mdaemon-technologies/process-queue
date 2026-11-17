@@ -11,6 +11,7 @@ Build and tooling release. The public API, its types and the supported Node vers
 
 ### Added
 - Consumer type fixtures (`test-types/`), type-checked by `npm test` against the built declarations through the package's `exports` map: as ES module and CommonJS code under `nodenext` resolution, and under `bundler` resolution.
+- `recipes.md`, linked from a new Recipes section in the README: production patterns for coalescing webhook bursts, calling a rate-limited API with a dead letter queue, prioritizing interactive work, batching writes with bounded memory, syncing offline edits in the browser, and shutting down gracefully, plus when to use a durable broker instead.
 
 ### Changed
 - Built with Vite 8 instead of Rollup, and tested with Vitest 5 instead of Jest. The bundles keep their names, formats and exports, and the type declarations are unchanged apart from the TypeScript 7 quote style below.

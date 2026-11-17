@@ -10,7 +10,8 @@
   "typings": "dist/processQueue.d.ts",
   "files": [
     "dist",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "recipes.md"
   ],
   "publishConfig": {
     "access": "public"
