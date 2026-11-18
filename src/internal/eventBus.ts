@@ -1,4 +1,5 @@
 /** Maps each event name to its handler signature */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- any[] lets every handler signature satisfy the constraint
 export type EventMap = { [event: string]: (...args: any[]) => void };
 
 /** Each registered handler of one event, with a token identifying that registration */

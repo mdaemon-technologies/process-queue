@@ -23,10 +23,11 @@ const commonJsDefault = 'if (typeof module === "object" && module.exports) modul
 
 /**
  * The tsc script that builds the declarations; src/typescript.test.ts checks its version.
- * TypeScript 7's "exports" map hides bin/tsc, so it is found through package.json's "bin".
+ * TypeScript 7 is installed as @typescript/native, because `typescript` is the TypeScript 6 API
+ * that typescript-eslint imports. Its "exports" map hides bin/tsc, so it is found through package.json's "bin".
  */
 export function tscPath(): string {
-  const manifest = require.resolve('typescript/package.json')
+  const manifest = require.resolve('@typescript/native/package.json')
   return path.join(path.dirname(manifest), require(manifest).bin.tsc)
 }
 

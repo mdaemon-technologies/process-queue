@@ -23,6 +23,7 @@ Snapshots now carry what a restored queue needs to continue exactly where the or
 
   Snapshots without `itemState` restore exactly as before.
 - `serialize()` is typed `Required<Snapshot<T>>` as before, so its return type now includes `itemState`. Only code that builds a `Required<Snapshot<T>>` object by hand needs to add it.
+- Development: the source, tests, type fixtures and smoke tests are linted with ESLint 10 and typescript-eslint's recommended rules (`npm run lint`), and CI and the publish workflow run it before building, as does `npm run pub`. typescript-eslint needs the TypeScript 6 API, so `typescript` is now an alias of `@typescript/typescript6` and TypeScript 7, which still builds the declarations and type-checks, is installed as `@typescript/native`. The bundles and declarations are unchanged by this.
 
 ## [3.0.2] - 2026-11-17
 

@@ -34,6 +34,7 @@ jobs:
       run: test "v$(node -p "require('./package.json').version")" = "$TAG"
     # TypeScript 7's compiler is a per-platform optional dependency, so never --omit=optional
     - run: npm ci
+    - run: npm run lint
     - run: npm run build
     - run: npm test
     - run: npm run test:smoke

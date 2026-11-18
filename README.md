@@ -316,10 +316,13 @@ The package runs on Node 20 and later. Building and testing it needs Node 22.12 
 
 ```bash
 npm ci
+npm run lint         # ESLint with typescript-eslint's recommended rules: the source, tests, fixtures and smoke tests
 npm run build        # Vite bundles dist/processQueue.{mjs,cjs,umd.js}; TypeScript 7's tsc writes the .d.ts files
 npm test             # tsc type-checks the source and tests, then Vitest runs src/**/*.test.ts
 npm run test:smoke   # node:test smoke checks of the three built bundles (smoke/)
 ```
+
+TypeScript 7 is installed as `@typescript/native` and provides `tsc`. The `typescript` package is an alias of `@typescript/typescript6`, because typescript-eslint needs the TypeScript 6 API to parse the source. CI runs `npm run lint` before building.
 
 Some tests read the built `dist/`, so run `npm run build` before `npm test` after changing the source. Among them, the fixtures in `test-types/` type-check the published declarations the way consumers use them: through the package's `exports` map, as ES module and CommonJS code under `nodenext` resolution, and under `bundler` resolution.
 

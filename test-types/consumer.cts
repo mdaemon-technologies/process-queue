@@ -1,5 +1,6 @@
 // A CommonJS consumer. Its require() resolves to dist/processQueue.cjs, whose module.exports
 // is the constructor and also carries it as .default, which is what the declarations' default export says.
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- the CommonJS import this fixture checks
 import processQueue = require('@mdaemon/process-queue')
 import type { ItemID, ItemState, OverflowStrategy, ProcessQueueOptions, RetryInfo, Snapshot } from '@mdaemon/process-queue'
 

@@ -474,7 +474,7 @@ describe('ProcessQueue - Worker & Concurrency', () => {
 
     const queue = new ProcessQueue<{ id: string; value: number }>({
       concurrency: 2,
-      worker: async (item) => {
+      worker: async () => {
         active++
         maxActive = Math.max(maxActive, active)
         await new Promise<void>(resolve => resolvers.push(resolve))
@@ -633,6 +633,7 @@ describe('ProcessQueue - Retry & Dead Letter Queue', () => {
     queue.queueItem({ id: '1', value: 10 })
     await failed
     expect(delays).toEqual([1, 2])
+    expect(attempts).toBe(3)
     expect(queue.getDeadLetterQueue().length).toBe(1)
   })
 
@@ -738,7 +739,7 @@ describe('ProcessQueue - TTL & Processing Timeout', () => {
     const expiredHandler = vi.fn()
     const queue = new ProcessQueue<{ id: string; value: number }>({
       ttl: 1,
-      worker: (item) => {}
+      worker: () => {}
     })
     queue.on('expired', expiredHandler)
     // Items are processed immediately by worker, TTL doesn't apply
