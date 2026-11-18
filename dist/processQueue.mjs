@@ -262,14 +262,14 @@ var e = {
 	forget = (e) => {
 		this._attempts.delete(e);
 	};
-	schedule = (e, t, n, r) => {
-		let i = this.clock.setTimeout(() => {
+	schedule = (e, t, n, r, i = this.clock.now() + n) => {
+		let a = this.clock.setTimeout(() => {
 			this._pending.delete(t), r();
 		}, n);
 		this._pending.set(t, {
 			item: e,
-			timer: i,
-			dueAt: this.clock.now() + n
+			timer: a,
+			dueAt: i
 		});
 	};
 	isPending = (e) => this._pending.has(e);
@@ -477,7 +477,10 @@ var e = {
 			t && i._retries.setAttempts(e, t);
 		});
 		let y = e.now();
-		return _.forEach((e) => i._scheduleRetry(e, e.id, p(m.get(e.id) - y))), i._emptyReported = i._queue.length === 0, i._drainReported = i._isIdle(), i;
+		return _.forEach((e) => {
+			let t = m.get(e.id);
+			i._scheduleRetry(e, e.id, p(t - y), t);
+		}), i._emptyReported = i._queue.length === 0, i._drainReported = i._isIdle(), i;
 	};
 	_itemStates = (e) => {
 		let t = [];
@@ -598,11 +601,11 @@ var e = {
 			delay: 0
 		}), this._autoProcess());
 	};
-	_scheduleRetry = (e, t, n) => {
+	_scheduleRetry = (e, t, n, r) => {
 		this._retries.schedule(e, t, n, () => {
 			let n = this._requeueForRetry(e);
 			n ? this._failPermanently(e, t, n) : this._autoProcess();
-		});
+		}, r);
 	};
 	_retryDelayFor = (e) => {
 		let t = this._options.retryDelay;

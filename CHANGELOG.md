@@ -17,7 +17,7 @@ Snapshots now carry what a restored queue needs to continue exactly where the or
 ### Changed
 - `deserialize` restores `itemState` when the snapshot has it:
   - Restored items keep their failed attempts, so they only get their remaining retries. Previously every restored item started with its full retry budget.
-  - Items awaiting a retry stay reserved until their `retryAt` (re-entering on the next timer tick if it has passed), instead of being queued immediately. Like a new item, one coming due starts processing in a restored worker queue that has not been started, unless the queue is paused.
+  - Items awaiting a retry stay reserved until their `retryAt` (re-entering on the next timer tick if it has passed), instead of being queued immediately. Until then `serialize()` reports that same `retryAt`, so saving and restoring repeatedly never moves it. Like a new item, one coming due starts processing in a restored worker queue that has not been started, unless the queue is paused.
   - Queued items are subject to the TTL from their `enqueuedAt` rather than from the moment of restore. Retried items (with `attempts` but no `enqueuedAt`, and items awaiting a retry) stay exempt from the TTL, as they are while the queue runs; previously they became subject to it from the moment of restore.
   - Malformed `itemState` throws a `TypeError`: an entry that is not an object with a valid ID, an ID that is not queued or in process or is repeated, `attempts` that is not an integer ≥ 0, a `retryAt` or `enqueuedAt` that is not a finite number, or either one on an in-process item. Unknown fields are ignored.
 

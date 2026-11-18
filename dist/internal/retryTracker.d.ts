@@ -24,8 +24,10 @@ export declare class RetryTracker<T extends Item> {
     /**
      * Holds an item until its retry delay passes
      * @param onFire - Called after the item stops being pending
+     * @param dueAt - The due time to report, when the caller already knows it (a restored
+     *   retry keeps its own); otherwise now plus the delay
      */
-    schedule: (item: T, id: ItemID, delay: number, onFire: () => void) => void;
+    schedule: (item: T, id: ItemID, delay: number, onFire: () => void, dueAt?: number) => void;
     isPending: (id: ItemID) => boolean;
     /** When a pending retry is due (clock time in ms), or undefined if none is pending for the id */
     dueAt: (id: ItemID) => number | undefined;

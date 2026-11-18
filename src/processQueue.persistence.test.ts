@@ -296,6 +296,7 @@ describe('ProcessQueue - deserialize restores items awaiting a retry', () => {
     )
     queue.start()
     expect(worker).not.toHaveBeenCalled()
+    expect(queue.serialize().itemState).toEqual([{ id: 'a', retryAt: 1 }])
 
     await vi.advanceTimersByTimeAsync(0)
     expect(worker).toHaveBeenCalledWith({ id: 'a' })
@@ -401,5 +402,20 @@ describe('ProcessQueue - per-item state round-trips', () => {
     const restored = ProcessQueue.deserialize<Job>(JSON.parse(JSON.stringify(snapshot)), options)
     expect(restored.serialize()).toEqual(snapshot)
     restored.clear()
+  })
+
+  // On a real clock the millisecond can turn between deserialize's reads of the time
+  test('with retryAt unchanged when the clock ticks during the restore', () => {
+    const snapshot = { queue: [{ id: 'a' }], inProcess: [], deadLetterQueue: [], itemState: [{ id: 'a', attempts: 1, retryAt: 105_000 }] }
+    let now = 100_000
+    const ticking = vi.spyOn(Date, 'now').mockImplementation(() => now++)
+
+    try {
+      const restored = ProcessQueue.deserialize<Job>(snapshot, { maxRetries: 3 })
+      expect(restored.serialize()).toEqual(snapshot)
+      restored.clear()
+    } finally {
+      ticking.mockRestore()
+    }
   })
 })

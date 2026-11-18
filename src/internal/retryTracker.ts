@@ -37,13 +37,15 @@ export class RetryTracker<T extends Item> {
   /**
    * Holds an item until its retry delay passes
    * @param onFire - Called after the item stops being pending
+   * @param dueAt - The due time to report, when the caller already knows it (a restored
+   *   retry keeps its own); otherwise now plus the delay
    */
-  schedule = (item: T, id: ItemID, delay: number, onFire: () => void): void => {
+  schedule = (item: T, id: ItemID, delay: number, onFire: () => void, dueAt = this.clock.now() + delay): void => {
     const timer = this.clock.setTimeout(() => {
       this._pending.delete(id);
       onFire();
     }, delay);
-    this._pending.set(id, { item, timer, dueAt: this.clock.now() + delay });
+    this._pending.set(id, { item, timer, dueAt });
   };
 
   isPending = (id: ItemID): boolean => this._pending.has(id);

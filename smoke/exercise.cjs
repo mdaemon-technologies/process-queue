@@ -174,16 +174,20 @@ function snapshot(ProcessQueue) {
   const failing = new ProcessQueue({ ...options, worker: () => { throw new Error('work'); } });
   failing.queueItem({ id: 'r' });
   const saved = JSON.parse(JSON.stringify(failing.serialize()));
+  // Cancels the retry timer, so the process can exit
   failing.clear();
   assert.equal(saved.itemState.length, 1, 'the retry is recorded');
   assert.equal(saved.itemState[0].attempts, 1);
   assert.equal(typeof saved.itemState[0].retryAt, 'number');
 
   const again = ProcessQueue.deserialize(saved, options);
-  assert.equal(again.has('r'), false, 'still awaiting its retry');
-  assert.deepEqual(JSON.parse(JSON.stringify(again.serialize())), saved);
-  // Cancels the retry timer, so the process can exit
-  again.clear();
+  try {
+    assert.equal(again.has('r'), false, 'still awaiting its retry');
+    assert.deepEqual(JSON.parse(JSON.stringify(again.serialize())), saved, 'retryAt is kept exactly');
+  } finally {
+    // Even when a check fails: otherwise its 60 s retry timer holds the process open
+    again.clear();
+  }
 }
 
 /** An async worker with concurrency, onIdle() and 'drain'. */

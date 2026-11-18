@@ -512,7 +512,11 @@ class ProcessQueue<QueueItem extends Item = Item & { [key: string]: unknown }> {
       if (attempts) queue._retries.setAttempts(id, attempts);
     });
     const now = systemClock.now();
-    awaitingRetry.forEach(item => queue._scheduleRetry(item, item.id, normalizeDelay(retryAt.get(item.id)! - now)));
+    awaitingRetry.forEach(item => {
+      // The snapshot's own due time, so serialize() reports it unchanged
+      const dueAt = retryAt.get(item.id)!;
+      queue._scheduleRetry(item, item.id, normalizeDelay(dueAt - now), dueAt);
+    });
 
     // After the retries are scheduled: items awaiting a retry keep the queue from being idle
     queue._emptyReported = queue._queue.length === 0;
@@ -798,7 +802,7 @@ class ProcessQueue<QueueItem extends Item = Item & { [key: string]: unknown }> {
    * Holds a failed item until its retry delay passes, then puts it back in the queue,
    * or dead-letters it if the comparator throws as it re-enters
    */
-  private _scheduleRetry = (item: QueueItem, id: ItemID, delay: number): void => {
+  private _scheduleRetry = (item: QueueItem, id: ItemID, delay: number, dueAt?: number): void => {
     this._retries.schedule(item, id, delay, () => {
       const requeueError = this._requeueForRetry(item);
       if (requeueError) {
@@ -806,7 +810,7 @@ class ProcessQueue<QueueItem extends Item = Item & { [key: string]: unknown }> {
       } else {
         this._autoProcess();
       }
-    });
+    }, dueAt);
   };
 
   /**
