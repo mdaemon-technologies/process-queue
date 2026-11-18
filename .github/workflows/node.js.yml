@@ -33,6 +33,9 @@ jobs:
       with:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
+    # package-lock.json is written by npm 11. Node 22's npm 10 resolves typescript-eslint's unmet
+    # optional peer (@typescript/native, a 7.1 nightly) differently and rejects the lockfile.
+    - run: npm install -g npm@11
     # TypeScript 7's compiler is a per-platform optional dependency, so never --omit=optional
     - run: npm ci
     - run: npm run lint

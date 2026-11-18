@@ -32,6 +32,8 @@ jobs:
       env:
         TAG: ${{ github.event.release.tag_name }}
       run: test "v$(node -p "require('./package.json').version")" = "$TAG"
+    # The npm that writes package-lock.json (see node.js.yml), whatever Node 24 bundles
+    - run: npm install -g npm@11
     # TypeScript 7's compiler is a per-platform optional dependency, so never --omit=optional
     - run: npm ci
     - run: npm run lint
