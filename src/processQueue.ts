@@ -54,12 +54,13 @@ class ProcessQueue<QueueItem extends Item = Item & { [key: string]: unknown }> {
 
   /**
    * What each overflow strategy does when a new item arrives at a full queue:
-   * returns the index of the queued item to evict (-1 if none), returns null to drop the new item, or throws
+   * returns the id of the queued item to evict, returns undefined to drop the new item, or throws
    */
-  private readonly _overflowHandlers: Record<OverflowStrategy, () => number | null> = {
+  private readonly _overflowHandlers: Record<OverflowStrategy, () => ItemID | undefined> = {
     'reject': () => { throw new Error("Queue size limit reached"); },
-    'drop-oldest': () => this._queue.findOldestIndex(),
-    'drop-newest': () => null,
+    // Undefined when nothing is queued to evict (only pending retries fill the queue)
+    'drop-oldest': () => this._queue.oldest(),
+    'drop-newest': () => undefined,
   };
 
   /**
@@ -107,21 +108,17 @@ class ProcessQueue<QueueItem extends Item = Item & { [key: string]: unknown }> {
       return false;
     }
 
-    const idx = this._queue.indexOf(item.id);
-
     // Only a genuinely new item can overflow the queue; updates never change its length.
     // Items awaiting a retry hold their place, so they count toward maxSize.
-    let evictIdx = -1;
-    if (idx < 0 && this._queue.length + this._retries.pendingCount >= this._options.maxSize) {
-      const outcome = this._overflowHandlers[this._options.overflowStrategy]();
-      // null, or nothing queued to evict (only pending retries fill the queue): drop the new item
-      if (outcome === null || outcome < 0) {
+    let evictId: ItemID | undefined;
+    if (!this._queue.has(item.id) && this._queue.length + this._retries.pendingCount >= this._options.maxSize) {
+      evictId = this._overflowHandlers[this._options.overflowStrategy]();
+      if (evictId === undefined) {
         return false;
       }
-      evictIdx = outcome;
     }
 
-    const evicted = this._queue.put(item, idx, evictIdx);
+    const evicted = this._queue.put(item, evictId);
     this._markWorkAdded();
     if (evicted) this._forgetDiscarded([evicted]);
 
@@ -747,35 +744,41 @@ class ProcessQueue<QueueItem extends Item = Item & { [key: string]: unknown }> {
    */
   private _onWorkerFailure = (item: QueueItem, id: ItemID, run: symbol, err: Error): void => {
     if (!this._inFlight.isCurrentRun(id, run)) return;
-    this._inFlight.finish(id);
-    this._handleWorkerError(item, id, err);
+    this._handleWorkerError(item, id, run, err);
   };
 
   /**
    * Handles worker errors with retry logic.
+   * The item stays in process until the retry delay is decided, so while a retryDelay function runs
+   * its id cannot be queued again, snapshots include it, and the queue is not idle. If it releases
+   * the run (doneProcessing, clear, a timeout check), the failure is ignored, as for any released run.
    * The retry is reserved (queued or pending) before 'error' is emitted, so a listener
    * that re-queues the same id updates the retry rather than creating a duplicate.
    */
-  private _handleWorkerError = (item: QueueItem, id: ItemID, err: Error): void => {
+  private _handleWorkerError = (item: QueueItem, id: ItemID, run: symbol, err: Error): void => {
     // Per-item state is always settled before emitting: a listener may re-queue this id
     const attempts = this._retries.attempts(id) + 1;
 
-    // Retry bookkeeping is keyed by the original id; a retry under a changed id could never end
+    let delay = 0;
+    let failure: Error | undefined;
     if (item.id !== id) {
-      this._failPermanently(item, id, new Error(`ProcessQueue: the worker changed the item's id from ${JSON.stringify(id)}; not retrying`), err);
-      return;
+      // Retry bookkeeping is keyed by the original id; a retry under a changed id could never end
+      failure = new Error(`ProcessQueue: the worker changed the item's id from ${JSON.stringify(id)}; not retrying`);
+    } else if (attempts > this._options.maxRetries) {
+      failure = err;
+    } else {
+      try {
+        delay = this._retryDelayFor(attempts);
+      } catch (delayError) {
+        failure = toError(delayError);
+      }
     }
 
-    if (attempts > this._options.maxRetries) {
-      this._failPermanently(item, id, err, err);
-      return;
-    }
-
-    let delay: number;
-    try {
-      delay = this._retryDelayFor(attempts);
-    } catch (delayError) {
-      this._failPermanently(item, id, toError(delayError), err);
+    // Released while the retryDelay function ran; the id may even be running again as a new item
+    if (!this._inFlight.isCurrentRun(id, run)) return;
+    this._inFlight.finish(id);
+    if (failure) {
+      this._failPermanently(item, id, failure, err);
       return;
     }
 

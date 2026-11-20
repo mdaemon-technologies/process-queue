@@ -16,52 +16,75 @@ export interface OrderedQueueConfig<T extends Item> {
  * Every method that removes an item also forgets its bookkeeping.
  * Never emits and never calls user code except the comparator, which always runs
  * before anything changes, so a throwing comparator leaves the queue intact.
+ *
+ * Finding an item and the oldest arrival is O(1). Adding at the front or back, updating, taking
+ * from the front and removing are O(1), or O(log n) with a TTL; expiring k items is O(k log n).
+ * Placing an item with a comparator scans the queue, O(n).
  */
 export declare class OrderedQueue<T extends Item> {
     private readonly config;
-    private readonly _items;
-    private readonly _enqueuedAt;
-    private readonly _arrivals;
-    private _nextArrival;
+    /** The queue, by id */
+    private readonly _entries;
+    /** The queue in processing order */
+    private _head;
+    private _tail;
+    /**
+     * The queue in arrival order, oldest first. A linked list rather than an insertion-ordered Map:
+     * V8 finds a Map's first key by skipping the entries deleted before it, which would make drop-oldest O(n).
+     */
+    private _oldest;
+    private _newest;
+    private _arrivals;
+    /**
+     * A binary min-heap of the entries that have an enqueue time, earliest first. Enqueue times are
+     * not in queue order or even in insertion order: an emplace update renews the time in place,
+     * restore() takes the snapshot's times, and the system clock can go back.
+     */
+    private readonly _byEnqueuedAt;
+    /** Counts changes to which items are queued, so a comparator that changes the queue mid-scan is caught */
+    private _changes;
     constructor(config: OrderedQueueConfig<T>);
     get length(): number;
     /** A copy of the items, in processing order */
     toArray: () => T[];
     /** The next item to process, without removing it */
     peek: () => T | undefined;
-    /**
-     * Finds a queued item by id
-     * @returns Its index, or -1 if it is not queued
-     */
-    indexOf: (id: ItemID) => number;
     has: (id: ItemID) => boolean;
     /** When a queued item was put, for the TTL; undefined without a TTL, and for retried items */
     enqueuedAt: (id: ItemID) => number | undefined;
-    /** Iterates the live queue */
+    /**
+     * Iterates the live queue. Items removed before the iterator reaches them are skipped, and no item
+     * is visited twice unless it is re-queued. While the last item visited stays queued, items inserted
+     * after it are visited; once it is removed, iteration carries on from the item that followed it then.
+     */
     [Symbol.iterator](): Iterator<T>;
     /**
      * Finds the earliest-arrived item, whatever its position
-     * @returns Its index, or -1 if the queue is empty
+     * @returns Its id, or undefined if the queue is empty
      */
-    findOldestIndex: () => number;
+    oldest: () => ItemID | undefined;
     /**
      * Adds an item, or updates the queued item with the same id
-     * @param existingIdx - indexOf(item.id)
-     * @param evictIdx - Index of an item to evict to make room, or -1
+     * @param evictId - Id of a queued item to evict to make room, if any; ignored for an update
      * @returns The evicted item, if any
      * @throws Whatever the comparator throws, before anything changes
      */
-    put: (item: T, existingIdx: number, evictIdx: number) => T | undefined;
+    put: (item: T, evictId?: ItemID) => T | undefined;
     /**
      * Puts a retried item back: in comparator order when there is a comparator,
      * otherwise at the front. Retried items are exempt from the TTL.
+     * ProcessQueue never retries an id that is queued: the id stays reserved, in process or awaiting
+     * its retry, until the retry enters the queue. Should a queued copy exist all the same, it is
+     * replaced, so an id is never queued twice.
      * @throws Whatever the comparator throws, before anything changes
      */
     insertRetry: (item: T) => void;
     /**
      * Removes items from the front
-     * @param count - Maximum number of items to take
+     * @param count - Maximum number of items to take, coerced as Array.prototype.splice coerces it.
+     *                Unlike splice, the length is read after converting it, which may run user code (valueOf).
      * @returns The items taken, in queue order
+     * @throws {TypeError} If count cannot be converted to a number (a Symbol or a BigInt)
      */
     take: (count: number) => T[];
     /**
@@ -71,7 +94,7 @@ export declare class OrderedQueue<T extends Item> {
     remove: (id: ItemID) => T | undefined;
     /**
      * Removes every item older than the TTL
-     * @returns The expired items
+     * @returns The expired items, in queue order
      */
     expire: () => T[];
     /**
@@ -91,13 +114,39 @@ export declare class OrderedQueue<T extends Item> {
         arrivals: number;
     };
     /**
-     * Finds where an item belongs, respecting comparator/priority ordering.
-     * If no comparator: emplace mode appends to back, otherwise inserts at front.
-     * @param skipIdx - Index of an entry that will be removed before inserting, or -1
-     * @returns The insert index in the queue as it will be after skipIdx is removed
+     * Finds where an item belongs, respecting comparator/priority ordering:
+     * before the first entry the comparator puts after it. Without a comparator,
+     * emplace mode appends to the back, otherwise the item goes to the front.
+     * @param skip - An entry that will be removed before inserting
+     * @returns The entry to insert before, or null for the back
+     * @throws Whatever the comparator throws, or an Error if the comparator changes the queue,
+     *         which would leave the position stale
      */
-    private _findInsertIndex;
-    private _markEnqueued;
+    private _findInsertPosition;
+    /** The entry to insert before to put an item at the front, once `skip` has been removed */
+    private _front;
+    /**
+     * Links a new entry for an item whose id is not queued, before `before` or at the back for null.
+     * The caller records its arrival and enqueue time.
+     * @returns The new entry
+     */
+    private _link;
+    /**
+     * Unlinks an entry from the queue and forgets its bookkeeping
+     * @returns Its item
+     */
+    private _unlink;
+    /** Marks an unlinked entry removed and drops everything but its `next` */
+    private _retire;
+    private _rankBetween;
+    private _fitsBetween;
+    /** Renumbers the queue 0, 1, 2, … in processing order */
+    private _renumber;
+    /** Makes a newly linked entry the newest arrival */
     private _recordArrival;
-    private _forget;
+    /** Records when an entry was put, for the TTL; does nothing without a TTL */
+    private _markEnqueued;
+    private _heapDelete;
+    private _siftUp;
+    private _siftDown;
 }

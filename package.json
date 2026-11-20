@@ -1,6 +1,6 @@
 {
   "name": "@mdaemon/process-queue",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "type": "module",
   "description": "A lightweight, zero-dependency queue with ID-based deduplication, in-flight tracking, priority ordering, worker auto-processing, retry/DLQ, and event-driven lifecycle",
   "main": "dist/processQueue.umd.js",
@@ -67,6 +67,7 @@
     "@types/node": "^22.20.5",
     "@typescript/native": "npm:typescript@^7.0.2",
     "eslint": "^10.15.0",
+    "fast-check": "^4.10.3",
     "globals": "^17.14.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-eslint": "^8.73.0",

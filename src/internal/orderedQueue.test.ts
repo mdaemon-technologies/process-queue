@@ -12,7 +12,7 @@ const manualClock = () => {
 const create = (config: { emplace?: boolean; comparator?: (a: T, b: T) => number; ttl?: number } = {}) => {
   const { clock, advance } = manualClock()
   const queue = new OrderedQueue<T>({ emplace: false, ttl: 0, ...config, clock })
-  const add = (item: T) => queue.put(item, queue.indexOf(item.id), -1)
+  const add = (item: T) => queue.put(item)
   return { queue, add, advance }
 }
 
@@ -50,7 +50,7 @@ describe('OrderedQueue', () => {
       const { queue, add } = create({ comparator: (a, b) => { if (fail) throw new Error('cmp'); return a.p! - b.p! } })
       add({ id: 'a', p: 1 }); add({ id: 'b', p: 2 })
       fail = true
-      expect(() => queue.put({ id: 'c', p: 3 }, -1, queue.findOldestIndex())).toThrow('cmp')
+      expect(() => queue.put({ id: 'c', p: 3 }, queue.oldest())).toThrow('cmp')
       expect(() => add({ id: 'b', p: 0 })).toThrow('cmp')
       expect(queue.toArray()).toEqual([{ id: 'a', p: 1 }, { id: 'b', p: 2 }])
       expect(queue.bookkeepingSizes().arrivals).toBe(2)
@@ -58,25 +58,27 @@ describe('OrderedQueue', () => {
   })
 
   describe('eviction', () => {
-    test('findOldestIndex finds the earliest arrival whatever the mode', () => {
+    test('oldest finds the earliest arrival whatever the mode', () => {
       const { queue, add } = create({ emplace: true })
       add({ id: 'old' }); add({ id: 'new' })
-      expect(queue.findOldestIndex()).toBe(0)
+      expect(queue.oldest()).toBe('old')
       const other = create()
       other.add({ id: 'old' }); other.add({ id: 'new' })
-      expect(other.queue.findOldestIndex()).toBe(1)
+      // At the back in default mode
+      expect(ids(other.queue)).toEqual(['new', 'old'])
+      expect(other.queue.oldest()).toBe('old')
     })
 
     test('an emplace replacement keeps its arrival', () => {
       const { queue, add } = create({ emplace: true })
       add({ id: 'a' }); add({ id: 'b' }); add({ id: 'a', p: 1 })
-      expect(queue.toArray()[queue.findOldestIndex()].id).toBe('a')
+      expect(queue.oldest()).toBe('a')
     })
 
-    test('put with an eviction index returns the evicted item and forgets it', () => {
+    test('put with an eviction id returns the evicted item and forgets it', () => {
       const { queue, add } = create({ ttl: 100 })
       add({ id: 'a' }); add({ id: 'b' })
-      const evicted = queue.put({ id: 'c' }, -1, queue.findOldestIndex())
+      const evicted = queue.put({ id: 'c' }, queue.oldest())
       expect(evicted).toEqual({ id: 'a' })
       expect(ids(queue)).toEqual(['c', 'b'])
       expect(queue.bookkeepingSizes()).toEqual({ enqueuedAt: 2, arrivals: 2 })
@@ -126,6 +128,31 @@ describe('OrderedQueue', () => {
       expect(noTtl.enqueuedAt('a')).toBeUndefined()
     })
 
+    test('expire returns items in queue order, whatever order they were put in', () => {
+      const { queue, add, advance } = create({ comparator: (a, b) => a.p! - b.p!, ttl: 100 })
+      // Not at the front: a gap starting at 0 could be halved about a thousand times
+      add({ id: 'zero', p: -1 }); add({ id: 'first', p: 0 }); add({ id: 'last', p: 1 })
+      // Each goes just after 'first', halving the same gap again, past a double's precision
+      for (let i = 1; i <= 100; i++) add({ id: `x${i}`, p: 2 ** -i })
+      advance(150)
+      const inOrder = ['zero', 'first', ...Array.from({ length: 100 }, (_, i) => `x${100 - i}`), 'last']
+      expect(ids(queue)).toEqual(inOrder)
+      expect(queue.expire().map(item => item.id)).toEqual(inOrder)
+    })
+
+    test('expire returns items in queue order in emplace mode, where an update renews the time in place', () => {
+      const { queue, add, advance } = create({ emplace: true, ttl: 100 })
+      add({ id: 'a' }); add({ id: 'b' })
+      advance(50)
+      add({ id: 'a', p: 1 })
+      advance(70)
+      expect(queue.expire()).toEqual([{ id: 'b' }])
+      advance(50)
+      add({ id: 'c' })
+      advance(60)
+      expect(queue.expire()).toEqual([{ id: 'a', p: 1 }])
+    })
+
     test('expire does nothing without a TTL', () => {
       const { queue, add, advance } = create()
       add({ id: 'a' })
@@ -152,6 +179,25 @@ describe('OrderedQueue', () => {
       expect(queue.expire()).toEqual([{ id: 'a' }])
     })
 
+    // ProcessQueue never retries a queued id; insertRetry keeps the id unique all the same
+    test.each([
+      ['default mode', {}, ['r', 'b']],
+      ['emplace mode', { emplace: true }, ['r', 'b']],
+      ['a comparator', { comparator: (a: T, b: T) => a.p! - b.p! }, ['b', 'r']],
+    ])('insertRetry replaces a queued copy of the id rather than queueing it twice (%s)', (_label, config, order) => {
+      const { queue, add } = create({ ...config, ttl: 100 })
+      add({ id: 'r', p: 0 }); add({ id: 'b', p: 1 })
+      queue.insertRetry({ id: 'r', p: 2 })
+      expect(ids(queue)).toEqual(order)
+      expect([...queue].map(i => i.id)).toEqual(order)
+      expect(queue.length).toBe(2)
+      expect(queue.toArray().find(i => i.id === 'r')).toEqual({ id: 'r', p: 2 })
+      // Retried, so exempt from the TTL
+      expect(queue.enqueuedAt('r')).toBeUndefined()
+      expect(queue.bookkeepingSizes()).toEqual({ enqueuedAt: 1, arrivals: 2 })
+      expect(queue.oldest()).toBe('b')
+    })
+
     test('insertRetry follows the comparator and throws before changing anything', () => {
       let fail = false
       const { queue, add } = create({ comparator: (a, b) => { if (fail) throw new Error('cmp'); return b.p! - a.p! } })
@@ -172,7 +218,7 @@ describe('OrderedQueue', () => {
       const { queue } = create(config)
       queue.restore([{ id: 'a' }, { id: 'b' }])
       expect(ids(queue)).toEqual(['a', 'b'])
-      expect(queue.toArray()[queue.findOldestIndex()].id).toBe(oldest)
+      expect(queue.oldest()).toBe(oldest)
     })
 
     test('with a comparator, restored items are put in priority order', () => {
@@ -204,6 +250,54 @@ describe('OrderedQueue', () => {
       expect(queue.enqueuedAt('retried')).toBeUndefined()
       advance(150)
       expect(queue.expire()).toEqual([{ id: 'new' }])
+    })
+  })
+
+  // An iterator standing on a removed entry holds it, and through its `next` every entry removed after it.
+  // So a removed entry keeps only that link: no item, and no link back into the queue's other structures.
+  describe('a removed entry holds no items', () => {
+    const entry = (queue: OrderedQueue<T>, id: string) => (queue as any)._entries.get(id)
+    const expectRetired = (removed: any) => {
+      expect(removed.removed).toBe(true)
+      expect(removed.item).toBeUndefined()
+      expect(removed.prev).toBeNull()
+      expect(removed.older).toBeNull()
+      expect(removed.newer).toBeNull()
+    }
+
+    test.each([
+      ['take', (queue: OrderedQueue<T>) => queue.take(1)],
+      ['remove', (queue: OrderedQueue<T>) => queue.remove('a')],
+      ['eviction', (queue: OrderedQueue<T>) => queue.put({ id: 'c' }, 'a')],
+      ['update', (queue: OrderedQueue<T>) => queue.put({ id: 'a', p: 1 })],
+      ['retry of a queued id', (queue: OrderedQueue<T>) => queue.insertRetry({ id: 'a', p: 1 })],
+    ])('after %s', (_label, removeA) => {
+      const { queue, add } = create({ emplace: false, ttl: 100 })
+      add({ id: 'b' }); add({ id: 'a' })
+      const a = entry(queue, 'a')
+      removeA(queue)
+      expectRetired(a)
+      expect(a.next).toBe(entry(queue, 'b'))
+    })
+
+    test('after expiry', () => {
+      const { queue, add, advance } = create({ ttl: 100 })
+      add({ id: 'a' })
+      const a = entry(queue, 'a')
+      advance(150)
+      expect(queue.expire()).toEqual([{ id: 'a' }])
+      expectRetired(a)
+    })
+
+    test('after clear, which also cuts the links onward', () => {
+      const { queue, add } = create()
+      add({ id: 'b' }); add({ id: 'a' })
+      const [a, b] = [entry(queue, 'a'), entry(queue, 'b')]
+      queue.clear()
+      for (const cleared of [a, b]) {
+        expectRetired(cleared)
+        expect(cleared.next).toBeNull()
+      }
     })
   })
 

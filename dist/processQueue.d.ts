@@ -35,7 +35,7 @@ declare class ProcessQueue<QueueItem extends Item = Item & {
     private _autoProcessAgain;
     /**
      * What each overflow strategy does when a new item arrives at a full queue:
-     * returns the index of the queued item to evict (-1 if none), returns null to drop the new item, or throws
+     * returns the id of the queued item to evict, returns undefined to drop the new item, or throws
      */
     private readonly _overflowHandlers;
     /**
@@ -295,6 +295,9 @@ declare class ProcessQueue<QueueItem extends Item = Item & {
     private _onWorkerFailure;
     /**
      * Handles worker errors with retry logic.
+     * The item stays in process until the retry delay is decided, so while a retryDelay function runs
+     * its id cannot be queued again, snapshots include it, and the queue is not idle. If it releases
+     * the run (doneProcessing, clear, a timeout check), the failure is ignored, as for any released run.
      * The retry is reserved (queued or pending) before 'error' is emitted, so a listener
      * that re-queues the same id updates the retry rather than creating a duplicate.
      */

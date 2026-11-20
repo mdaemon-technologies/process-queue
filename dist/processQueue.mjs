@@ -142,108 +142,170 @@ var e = {
 	return u(r), r;
 }, f = class {
 	config;
-	_items = [];
-	_enqueuedAt = /* @__PURE__ */ new Map();
-	_arrivals = /* @__PURE__ */ new Map();
-	_nextArrival = 0;
+	_entries = /* @__PURE__ */ new Map();
+	_head = null;
+	_tail = null;
+	_oldest = null;
+	_newest = null;
+	_arrivals = 0;
+	_byEnqueuedAt = [];
+	_changes = 0;
 	constructor(e) {
 		this.config = e;
 	}
 	get length() {
-		return this._items.length;
+		return this._entries.size;
 	}
-	toArray = () => [...this._items];
-	peek = () => this._items[0];
-	indexOf = (e) => this._items.findIndex((t) => t.id === e);
-	has = (e) => this.indexOf(e) >= 0;
-	enqueuedAt = (e) => this._enqueuedAt.get(e);
+	toArray = () => {
+		let e = [];
+		for (let t = this._head; t; t = t.next) e.push(t.item);
+		return e;
+	};
+	peek = () => this._head?.item;
+	has = (e) => this._entries.has(e);
+	enqueuedAt = (e) => this._entries.get(e)?.enqueuedAt;
 	[Symbol.iterator]() {
-		let e = 0, t = this._items;
+		let e = null, t = () => this._head;
 		return { next() {
-			return e < t.length ? {
-				value: t[e++],
+			let n = e ? e.next : t();
+			for (; n?.removed;) n = n.next;
+			return n ? (e = n, {
+				value: n.item,
 				done: !1
-			} : {
+			}) : {
 				value: void 0,
 				done: !0
 			};
 		} };
 	}
-	findOldestIndex = () => {
-		let e = -1, t = Infinity;
-		return this._items.forEach((n, r) => {
-			let i = this._arrivals.get(n.id) ?? -1;
-			i < t && (t = i, e = r);
-		}), e;
-	};
-	put = (e, t, n) => {
-		let r;
-		if (this.config.emplace && t >= 0) this._items.splice(t, 1, e);
-		else {
-			let i = t >= 0 ? t : n, a = this._findInsertIndex(e, i);
-			if (i >= 0) {
-				let [e] = this._items.splice(i, 1);
-				n >= 0 && (r = e, this._forget(e.id));
-			}
-			this._items.splice(a, 0, e), this._recordArrival(e.id);
+	oldest = () => this._oldest?.id;
+	put = (e, t) => {
+		let n = this._entries.get(e.id);
+		if (this.config.emplace && n) {
+			n.item = e, this._markEnqueued(n);
+			return;
 		}
-		return this._markEnqueued(e.id), r;
+		let r = n ?? (t === void 0 ? void 0 : this._entries.get(t)), i = this._findInsertPosition(e, r), a = r && this._unlink(r), o = this._link(e, i);
+		return this._recordArrival(o), this._markEnqueued(o), n ? void 0 : a;
 	};
 	insertRetry = (e) => {
-		let t = this.config.comparator ? this._findInsertIndex(e, -1) : 0;
-		this._items.splice(t, 0, e), this._recordArrival(e.id);
+		let t = this._entries.get(e.id), n = this.config.comparator ? this._findInsertPosition(e, t) : this._front(t);
+		t && this._unlink(t), this._recordArrival(this._link(e, n));
 	};
 	take = (e) => {
-		let t = this._items.splice(0, e);
-		return t.forEach((e) => this._forget(e.id)), t;
+		let t = Math.trunc(+e), n = Number.isNaN(t) ? 0 : Math.min(Math.max(t, 0), this.length), r = [];
+		for (let e = 0; e < n; e++) r.push(this._unlink(this._head));
+		return r;
 	};
 	remove = (e) => {
-		let t = this.indexOf(e);
-		if (t < 0) return;
-		let [n] = this._items.splice(t, 1);
-		return this._forget(e), n;
+		let t = this._entries.get(e);
+		return t && this._unlink(t);
 	};
 	expire = () => {
-		if (this.config.ttl <= 0) return [];
-		let e = this.config.clock.now(), t = (t) => {
-			let n = this._enqueuedAt.get(t.id);
-			return n !== void 0 && e - n > this.config.ttl;
-		}, n = this._items.filter(t);
-		if (n.length === 0) return [];
-		let r = this._items.filter((e) => !t(e));
-		return this._items.length = 0, r.forEach((e) => this._items.push(e)), n.forEach((e) => this._forget(e.id)), n;
+		let { ttl: e, clock: t } = this.config;
+		if (e <= 0) return [];
+		let n = t.now(), r = [];
+		for (let t = this._byEnqueuedAt[0]; t && n - t.enqueuedAt > e; t = this._byEnqueuedAt[0]) r.push({
+			rank: t.rank,
+			item: this._unlink(t)
+		});
+		return r.length > 1 && r.sort((e, t) => e.rank - t.rank), r.map(({ item: e }) => e);
 	};
 	restore = (e, t = /* @__PURE__ */ new Map(), n = /* @__PURE__ */ new Set()) => {
 		let { comparator: r } = this.config;
 		(r ? [...e].sort(r) : e).forEach((e) => {
-			this._items.push(e), n.has(e.id) || this._markEnqueued(e.id, t.get(e.id));
-		}), (this.config.emplace || this.config.comparator ? e : [...e].reverse()).forEach((e) => this._recordArrival(e.id));
+			let r = this._link(e, null);
+			n.has(e.id) || this._markEnqueued(r, t.get(e.id));
+		}), (this.config.emplace || this.config.comparator ? e : [...e].reverse()).forEach((e) => this._recordArrival(this._entries.get(e.id)));
 	};
 	clear = () => {
-		this._items.length = 0, this._enqueuedAt.clear(), this._arrivals.clear();
+		for (let e = this._head; e;) {
+			let t = e.next;
+			this._retire(e), e.next = null, e = t;
+		}
+		this._changes++, this._entries.clear(), this._head = null, this._tail = null, this._oldest = null, this._newest = null, this._arrivals = 0, this._byEnqueuedAt.length = 0;
 	};
 	bookkeepingSizes = () => ({
-		enqueuedAt: this._enqueuedAt.size,
-		arrivals: this._arrivals.size
+		enqueuedAt: this._byEnqueuedAt.length,
+		arrivals: this._arrivals
 	});
-	_findInsertIndex = (e, t) => {
-		let { comparator: n, emplace: r } = this.config, i = this._items.length - +(t >= 0);
-		if (!n) return r ? i : 0;
-		let a = 0;
-		for (let r = 0; r < this._items.length; r++) if (r !== t) {
-			if (n(e, this._items[r]) < 0) return a;
-			a++;
+	_findInsertPosition = (e, t) => {
+		let { comparator: n, emplace: r } = this.config;
+		if (!n) return r ? null : this._front(t);
+		let i = this._changes;
+		for (let r = this._head; r; r = r.next) {
+			if (r === t) continue;
+			let a = n(e, r.item);
+			if (this._changes !== i) throw Error("ProcessQueue: the comparator changed the queue");
+			if (a < 0) return r;
 		}
-		return a;
+		return null;
 	};
-	_markEnqueued = (e, t = this.config.clock.now()) => {
-		this.config.ttl > 0 && this._enqueuedAt.set(e, t);
+	_front = (e) => this._head === e ? e.next : this._head;
+	_link = (e, t) => {
+		let n = t ? t.prev : this._tail, r = this._rankBetween(n, t);
+		this._fitsBetween(r, n, t) || (this._renumber(), r = this._rankBetween(n, t));
+		let i = {
+			id: e.id,
+			item: e,
+			prev: n,
+			next: t,
+			rank: r,
+			older: null,
+			newer: null,
+			arrived: !1,
+			enqueuedAt: void 0,
+			heapIndex: -1,
+			removed: !1
+		};
+		return n ? n.next = i : this._head = i, t ? t.prev = i : this._tail = i, this._entries.set(i.id, i), this._changes++, i;
+	};
+	_unlink = (e) => {
+		e.prev ? e.prev.next = e.next : this._head = e.next, e.next ? e.next.prev = e.prev : this._tail = e.prev, this._entries.delete(e.id), this._changes++, e.arrived && (e.older ? e.older.newer = e.newer : this._oldest = e.newer, e.newer ? e.newer.older = e.older : this._newest = e.older, this._arrivals--), e.heapIndex >= 0 && this._heapDelete(e);
+		let { item: t } = e;
+		return this._retire(e), t;
+	};
+	_retire = (e) => {
+		e.removed = !0, e.item = void 0, e.prev = null, e.older = null, e.newer = null, e.arrived = !1, e.enqueuedAt = void 0, e.heapIndex = -1;
+	};
+	_rankBetween = (e, t) => e ? t ? (e.rank + t.rank) / 2 : e.rank + 1 : t ? t.rank - 1 : 0;
+	_fitsBetween = (e, t, n) => (!t || t.rank < e) && (!n || e < n.rank);
+	_renumber = () => {
+		let e = 0;
+		for (let t = this._head; t; t = t.next) t.rank = e++;
 	};
 	_recordArrival = (e) => {
-		this._arrivals.set(e, this._nextArrival++);
+		e.older = this._newest, this._newest ? this._newest.newer = e : this._oldest = e, this._newest = e, e.arrived = !0, this._arrivals++;
 	};
-	_forget = (e) => {
-		this._enqueuedAt.delete(e), this._arrivals.delete(e);
+	_markEnqueued = (e, t = this.config.clock.now()) => {
+		if (this.config.ttl <= 0) return;
+		let n = e.enqueuedAt;
+		e.enqueuedAt = t, e.heapIndex < 0 ? (e.heapIndex = this._byEnqueuedAt.push(e) - 1, this._siftUp(e.heapIndex)) : t < n ? this._siftUp(e.heapIndex) : this._siftDown(e.heapIndex);
+	};
+	_heapDelete = (e) => {
+		let t = this._byEnqueuedAt, n = e.heapIndex, r = t.pop();
+		e.heapIndex = -1, e.enqueuedAt = void 0, r !== e && (t[n] = r, r.heapIndex = n, this._siftUp(n), this._siftDown(r.heapIndex));
+	};
+	_siftUp = (e) => {
+		let t = this._byEnqueuedAt, n = t[e];
+		for (; e > 0;) {
+			let r = e - 1 >> 1, i = t[r];
+			if (i.enqueuedAt <= n.enqueuedAt) break;
+			t[e] = i, i.heapIndex = e, e = r;
+		}
+		t[e] = n, n.heapIndex = e;
+	};
+	_siftDown = (e) => {
+		let t = this._byEnqueuedAt, n = t[e];
+		for (;;) {
+			let r = 2 * e + 1;
+			if (r >= t.length) break;
+			r + 1 < t.length && t[r + 1].enqueuedAt < t[r].enqueuedAt && r++;
+			let i = t[r];
+			if (n.enqueuedAt <= i.enqueuedAt) break;
+			t[e] = i, i.heapIndex = e, e = r;
+		}
+		t[e] = n, n.heapIndex = e;
 	};
 }, p = (e) => {
 	let n = Number(e);
@@ -341,8 +403,8 @@ var e = {
 		reject: () => {
 			throw Error("Queue size limit reached");
 		},
-		"drop-oldest": () => this._queue.findOldestIndex(),
-		"drop-newest": () => null
+		"drop-oldest": () => this._queue.oldest(),
+		"drop-newest": () => void 0
 	};
 	constructor(t, a) {
 		let o = d(t, a);
@@ -357,14 +419,10 @@ var e = {
 	queueItem = (e) => {
 		if (!g(e)) throw Error("Invalid queue item: must have an id property");
 		if (this.isProcessing(e.id) || this._retries.isPending(e.id)) return !1;
-		let t = this._queue.indexOf(e.id), n = -1;
-		if (t < 0 && this._queue.length + this._retries.pendingCount >= this._options.maxSize) {
-			let e = this._overflowHandlers[this._options.overflowStrategy]();
-			if (e === null || e < 0) return !1;
-			n = e;
-		}
-		let r = this._queue.put(e, t, n);
-		return this._markWorkAdded(), r && this._forgetDiscarded([r]), r && this._emit("removed", r), this._emit("added", e), this._autoProcess(), !0;
+		let t;
+		if (!this._queue.has(e.id) && this._queue.length + this._retries.pendingCount >= this._options.maxSize && (t = this._overflowHandlers[this._options.overflowStrategy](), t === void 0)) return !1;
+		let n = this._queue.put(e, t);
+		return this._markWorkAdded(), n && this._forgetDiscarded([n]), n && this._emit("removed", n), this._emit("added", e), this._autoProcess(), !0;
 	};
 	getNextItem = () => {
 		if (this._paused) return null;
@@ -569,35 +627,32 @@ var e = {
 		this._inFlight.isCurrentRun(t, n) && (this._releaseInProcess(t), this._emit("done", e), this._checkDrain(), this._autoProcess());
 	};
 	_onWorkerFailure = (e, t, n, r) => {
-		this._inFlight.isCurrentRun(t, n) && (this._inFlight.finish(t), this._handleWorkerError(e, t, r));
+		this._inFlight.isCurrentRun(t, n) && this._handleWorkerError(e, t, n, r);
 	};
-	_handleWorkerError = (e, t, n) => {
-		let r = this._retries.attempts(t) + 1;
-		if (e.id !== t) {
-			this._failPermanently(e, t, /* @__PURE__ */ Error(`ProcessQueue: the worker changed the item's id from ${JSON.stringify(t)}; not retrying`), n);
+	_handleWorkerError = (e, t, n, r) => {
+		let i = this._retries.attempts(t) + 1, a = 0, o;
+		if (e.id !== t) o = /* @__PURE__ */ Error(`ProcessQueue: the worker changed the item's id from ${JSON.stringify(t)}; not retrying`);
+		else if (i > this._options.maxRetries) o = r;
+		else try {
+			a = this._retryDelayFor(i);
+		} catch (e) {
+			o = _(e);
+		}
+		if (!this._inFlight.isCurrentRun(t, n)) return;
+		if (this._inFlight.finish(t), o) {
+			this._failPermanently(e, t, o, r);
 			return;
 		}
-		if (r > this._options.maxRetries) {
-			this._failPermanently(e, t, n, n);
-			return;
-		}
-		let i;
-		try {
-			i = this._retryDelayFor(r);
-		} catch (r) {
-			this._failPermanently(e, t, _(r), n);
-			return;
-		}
-		if (i > 0) {
-			this._retries.setAttempts(t, r), this._scheduleRetry(e, t, i), this._emit("error", e, n, {
-				attempt: r,
-				delay: i
+		if (a > 0) {
+			this._retries.setAttempts(t, i), this._scheduleRetry(e, t, a), this._emit("error", e, r, {
+				attempt: i,
+				delay: a
 			}), this._autoProcess();
 			return;
 		}
-		let a = this._requeueForRetry(e);
-		a ? this._failPermanently(e, t, a, n) : (this._retries.setAttempts(t, r), this._emit("error", e, n, {
-			attempt: r,
+		let s = this._requeueForRetry(e);
+		s ? this._failPermanently(e, t, s, r) : (this._retries.setAttempts(t, i), this._emit("error", e, r, {
+			attempt: i,
 			delay: 0
 		}), this._autoProcess());
 	};

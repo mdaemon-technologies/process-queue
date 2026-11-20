@@ -178,6 +178,60 @@ describe('ProcessQueue', () => {
       expect(queue.length()).toBe(3)
     })
 
+    test('iteration skips items removed during the loop, and visits items added after its position', () => {
+      const fifo = new ProcessQueue<{ id: string }>({ emplace: true })
+      fifo.queueItem({ id: 'a' }); fifo.queueItem({ id: 'b' }); fifo.queueItem({ id: 'c' })
+      const seen: string[] = []
+      for (const item of fifo) {
+        seen.push(item.id)
+        if (item.id === 'a') {
+          // Takes the current item, then adds one at the back
+          fifo.getNextItem()
+          fifo.queueItem({ id: 'd' })
+        }
+        if (item.id === 'b') fifo.removeFromQueue('c')
+      }
+      expect(seen).toEqual(['a', 'b', 'd'])
+    })
+
+    test('once the current item is removed, iteration carries on from the item that followed it then', () => {
+      const fifo = new ProcessQueue<{ id: string }>({ emplace: true })
+      fifo.queueItem({ id: 'a' })
+      const seen: string[] = []
+      for (const item of fifo) {
+        seen.push(item.id)
+        // Nothing followed 'a' when it was taken, so 'b', added after, is not visited
+        if (item.id === 'a') {
+          fifo.getNextItem()
+          fifo.queueItem({ id: 'b' })
+        }
+      }
+      expect(seen).toEqual(['a'])
+      expect(fifo.getQueue()).toEqual([{ id: 'b' }])
+    })
+
+    test('iteration does not revisit an item when one is added before its position', () => {
+      queue.queueItem({ id: 'a', value: 1 }); queue.queueItem({ id: 'b', value: 2 })
+      const seen: string[] = []
+      for (const item of queue) {
+        seen.push(item.id)
+        // Default mode adds at the front
+        if (item.id === 'b') queue.queueItem({ id: 'c', value: 3 })
+      }
+      expect(seen).toEqual(['b', 'a'])
+    })
+
+    test('iteration ends when the queue is cleared during the loop', () => {
+      queue.queueItem({ id: 'a', value: 1 }); queue.queueItem({ id: 'b', value: 2 })
+      const seen: string[] = []
+      for (const item of queue) {
+        seen.push(item.id)
+        queue.clear()
+        queue.queueItem({ id: 'c', value: 3 })
+      }
+      expect(seen).toEqual(['b'])
+    })
+
     test('spread operator works with iterator', () => {
       queue.queueItem({ id: '1', value: 10 })
       queue.queueItem({ id: '2', value: 20 })

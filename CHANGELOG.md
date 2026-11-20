@@ -5,6 +5,29 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.0] - 2026-11-20
+
+Queue operations no longer slow down as the queue grows. Adding, finding, updating, taking and removing items, and `drop-oldest` evictions, used to scan or shift the whole queue, so filling or draining a large queue took quadratic time, and with a `ttl` every take scanned the queue twice. They now take constant time, or logarithmic time with a `ttl`. Behavior, events, `serialize()` output and the public types are unchanged, apart from the edge cases listed under Changed and Fixed.
+
+### Changed
+- Performance: the queue is a doubly linked list indexed by id instead of an array. Finding, adding at the front or back, updating, taking from the front and removing an item are O(1). `drop-oldest` finds the earliest arrival in O(1) through a second list kept in arrival order. With a `ttl`, each of these also updates a heap of enqueue times, so they are O(log n), and checking for expired items is O(1) when none have expired; k expired items cost O(k log n). Placing an item with a `comparator` still scans the queue (O(n)). Items are now found by the id they had when queued, so if a queued item's id is changed (which the README already says not to do), `has()`, `removeFromQueue()` and `queueItem()` still treat it under its old id; 3.1.0 used the new one. Measured on Node 22 (Windows, `maxSize: Infinity` except for `drop-oldest`), adding n items with `queueItem` and then draining them with `getNextItem()`, 3.1.0 → 3.2.0:
+
+  | Options | n = 10,000 (add / drain) | n = 20,000 (add / drain) | n = 40,000 (add / drain) |
+  |---|---|---|---|
+  | defaults | 119 / 105 ms → 27 / 15 ms | 580 / 507 ms → 18 / 23 ms | 3,191 / 1,926 ms → 42 / 29 ms |
+  | `emplace: true` | 76 / 13 ms → 9 / 21 ms | 455 / 578 ms → 13 / 12 ms | 1,783 / 1,845 ms → 38 / 54 ms |
+  | `ttl: 3_600_000` | 99 / 1,985 ms → 17 / 24 ms | 418 / 8,702 ms → 25 / 17 ms | 2,668 / 57,374 ms → 56 / 47 ms |
+  | `drop-oldest`, n more items into a full queue of `maxSize: n` | 4,182 ms → 23 ms | 14,304 ms → 22 ms | 63,265 ms → 103 ms |
+
+  The bundles are about 2 KB larger (about 0.7 KB gzipped).
+- Iterating the queue while it changes no longer skips or repeats items. An item removed or taken before the loop reaches it is skipped, and no item is visited twice unless it is re-queued. While the item the loop is on stays queued, an item added later in processing order is visited and one added earlier is not; once that item is removed, the loop carries on from the item that followed it at that moment. An iterator left standing on a removed item holds none of the removed items. Previously the iterator worked by index, so taking the current item skipped the next one and adding at the front visited the current item again. Iteration without changes is unchanged.
+- A `comparator` that adds, takes or removes items while an item is being placed now makes that placement throw `Error: ProcessQueue: the comparator changed the queue` before the item is queued: `queueItem` throws it, and a retried item is dead-lettered with it, as for a comparator that throws. Previously the item was inserted at a position computed before the change, which could put it in the wrong place or remove the wrong item. The README already said the comparator must not call back into the queue.
+- Development: `fast-check` is a new dev dependency. A differential property test drives the new queue and the 3.1.0 array implementation (kept as a test-only copy, excluded from the build) with random operations in every combination of `emplace`, comparator, `ttl`, `maxSize` and overflow strategy, and checks that they agree after every step. Complexity tests count reads of item ids, or time the operations at sizes where 3.1.0 took 25 s or more, against a limit of 10 s that allows for a busy machine.
+
+### Fixed
+- A failed item stays in process while a `retryDelay` function decides its delay. Previously the item was already out of process and not yet awaiting its retry, so for the length of that call the queue held it nowhere, with four effects. A `retryDelay` function could queue the failing id, and the retry then queued it a second time; if a worker had started that copy, the id was in process and queued at once, and with a delay `serialize()` listed it twice, so `deserialize` rejected the snapshot. A `serialize()` call left the item out of the snapshot. `drain` could be emitted, and `onIdle()` resolve, although a retry was coming. And a `clear()` was undone when the retry entered the queue. Now, while a `retryDelay` function runs, `isProcessing(id)` is `true`, `queueItem` returns `false` for the id, `serialize()` lists the item in `inProcess`, the queue is not idle, and the failed run keeps its concurrency slot until the function returns. If the function releases the run (`doneProcessing(id)`, `doneProcessing()`, `clear()`, or a `checkProcessingTimeouts()` that times it out), the failure is ignored, as for any released run: no retry, no `error` or `failed` event, and no dead-lettering, even if the function then throws. As a precaution, the queue also never holds an id twice: a retry that finds its id already queued replaces the queued copy.
+- `processBatch()` with a batch size whose `valueOf` changes the queue no longer loses items: the queue's length is read after the size is converted. Previously an item queued by `valueOf` could push a queued item out of the queue unseen.
+
 ## [3.1.0] - 2026-11-17
 
 Snapshots now carry what a restored queue needs to continue exactly where the original stopped, and the `error` event says whether the item will be retried. Together they let a wrapper keep a durable log of the queue's state and rebuild it after a crash.
@@ -179,6 +202,7 @@ Security and robustness release, plus an internal restructure along DRY and SOLI
   - Added `"rootDir": "./src"` (required by TS6 default change)
   - Added `"types": ["node", "jest"]` (required by TS6 default change)
 
+[3.2.0]: https://www.npmjs.com/package/@mdaemon/process-queue/v/3.2.0
 [3.1.0]: https://www.npmjs.com/package/@mdaemon/process-queue/v/3.1.0
 [3.0.2]: https://www.npmjs.com/package/@mdaemon/process-queue/v/3.0.2
 [3.0.1]: https://www.npmjs.com/package/@mdaemon/process-queue/v/3.0.1

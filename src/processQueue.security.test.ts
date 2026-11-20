@@ -1469,3 +1469,220 @@ describe('ProcessQueue - onIdle', () => {
     expect(idle()).toBe(true)
   })
 })
+
+describe('ProcessQueue - a comparator that changes the queue', () => {
+  type PItem = { id: string; p: number }
+  const changedQueue = 'ProcessQueue: the comparator changed the queue'
+
+  test('makes queueItem throw before the item is placed, leaving the queue consistent', () => {
+    let sabotage = false
+    const queue: ProcessQueue<PItem> = new ProcessQueue<PItem>({
+      comparator: (a, b) => {
+        if (sabotage && b.id === 'c') {
+          sabotage = false
+          queue.removeFromQueue('c')
+        }
+        return a.p - b.p
+      },
+    })
+    queue.queueMany([{ id: 'a', p: 1 }, { id: 'b', p: 2 }, { id: 'c', p: 3 }])
+    sabotage = true
+    // 'x' belongs just before 'c', which the comparator removes while comparing against it
+    expect(() => queue.queueItem({ id: 'x', p: 2.5 })).toThrow(changedQueue)
+    expect(queue.getQueue()).toEqual([{ id: 'a', p: 1 }, { id: 'b', p: 2 }])
+    expect([...queue]).toEqual([{ id: 'a', p: 1 }, { id: 'b', p: 2 }])
+    expect(queue.has('x')).toBe(false)
+    expect(queue.length()).toBe(2)
+    expect(queue._bookkeepingSizes().arrivals).toBe(2)
+    expect(queue.processBatch(5)).toEqual([{ id: 'a', p: 1 }, { id: 'b', p: 2 }])
+  })
+
+  test('dead-letters a retried item instead of re-queueing it', () => {
+    let sabotage = false
+    const failed = vi.fn()
+    const queue: ProcessQueue<PItem> = new ProcessQueue<PItem>({
+      worker: item => {
+        if (item.id !== 'r') return
+        sabotage = true
+        throw new Error('fail')
+      },
+      maxRetries: 1,
+      retryDelay: 0,
+      comparator: (a, b) => {
+        if (sabotage) {
+          sabotage = false
+          queue.removeFromQueue('a')
+        }
+        return a.p - b.p
+      },
+    })
+    queue.on('failed', failed)
+    queue.pause()
+    queue.queueMany([{ id: 'a', p: 1 }, { id: 'b', p: 2 }, { id: 'r', p: 0 }])
+    queue.resume()
+
+    expect(queue.getDeadLetterQueue()).toEqual([{ id: 'r', p: 0 }])
+    expect(failed).toHaveBeenCalledWith({ id: 'r', p: 0 }, expect.objectContaining({ message: changedQueue }))
+    expect(queue.length()).toBe(0)
+    expect(queue.has('a')).toBe(false)
+  })
+})
+
+describe('ProcessQueue - performance rewrite review', () => {
+  test('processBatch counts the queue after converting the batch size, so a valueOf that queues an item loses nothing', () => {
+    const queue: ProcessQueue<TestItem> = new ProcessQueue<TestItem>()
+    queue.queueItem({ id: 'a' })
+    const size = { valueOf() { queue.queueItem({ id: 'b' }); return 5 } }
+    expect(queue.processBatch(size as any)).toEqual([{ id: 'b' }, { id: 'a' }])
+    expect(queue.length()).toBe(0)
+    expect(queue._bookkeepingSizes()).toMatchObject({ enqueuedAt: 0, arrivals: 0 })
+  })
+})
+
+describe('ProcessQueue - the failed item stays in process while retryDelay runs', () => {
+  test('so retryDelay sees it in process, cannot queue its id again, and a snapshot includes it', () => {
+    const seen: { processing?: boolean; requeued?: boolean; snapshot?: ReturnType<ProcessQueue<TestItem>['serialize']> } = {}
+    const queue: ProcessQueue<TestItem> = new ProcessQueue<TestItem>({
+      worker: () => { throw new Error('fail') },
+      maxRetries: 1,
+      retryDelay: () => {
+        seen.processing = queue.isProcessing('r')
+        seen.requeued = queue.queueItem({ id: 'r', value: 'again' })
+        seen.snapshot = queue.serialize()
+        queue.pause()
+        return 0
+      },
+    })
+    queue.queueItem({ id: 'r', value: 'original' })
+
+    expect(seen.processing).toBe(true)
+    expect(seen.requeued).toBe(false)
+    expect(seen.snapshot!.inProcess).toEqual([{ id: 'r', value: 'original' }])
+    expect(seen.snapshot!.queue).toEqual([])
+    expect(queue.isProcessing('r')).toBe(false)
+    expect(queue.getQueue()).toEqual([{ id: 'r', value: 'original' }])
+  })
+
+  test('so an async worker is never running an id that is also queued', async () => {
+    const runs: string[] = []
+    const queue: ProcessQueue<TestItem> = new ProcessQueue<TestItem>({
+      worker: async item => {
+        runs.push(item.value!)
+        if (runs.length === 1) throw new Error('fail')
+      },
+      maxRetries: 1,
+      retryDelay: () => {
+        queue.queueItem({ id: 'r', value: 'queued by retryDelay' })
+        return 0
+      },
+    })
+    queue.queueItem({ id: 'r', value: 'original' })
+    await queue.onIdle()
+
+    // The retry, once; never the copy retryDelay tried to queue
+    expect(runs).toEqual(['original', 'original'])
+  })
+
+  test('so the queue is not reported idle while retryDelay runs', () => {
+    const drained = vi.fn()
+    const queue: ProcessQueue<TestItem> = new ProcessQueue<TestItem>({
+      worker: () => { throw new Error('fail') },
+      maxRetries: 1,
+      retryDelay: () => {
+        // Checks for idle on its way out
+        queue.doneProcessing('unrelated')
+        queue.pause()
+        return 0
+      },
+    })
+    queue.on('drain', drained)
+    queue.queueItem({ id: 'r' })
+
+    expect(drained).not.toHaveBeenCalled()
+    expect(queue.getQueue()).toEqual([{ id: 'r' }])
+  })
+})
+
+describe('ProcessQueue - a run that retryDelay releases is not retried', () => {
+  type Release = (queue: ProcessQueue<TestItem>) => void
+  test.each<[string, Release, boolean]>([
+    ['doneProcessing(id)', queue => queue.doneProcessing('r'), false],
+    ['doneProcessing()', queue => queue.doneProcessing(), false],
+    ['clear()', queue => queue.clear(), false],
+    ['doneProcessing(id), then throws', queue => queue.doneProcessing('r'), true],
+  ])('%s: its failure is ignored, as for any released run', (_label, release, thenThrow) => {
+    const events = { error: vi.fn(), failed: vi.fn(), done: vi.fn() }
+    const queue: ProcessQueue<TestItem> = new ProcessQueue<TestItem>({
+      worker: () => { throw new Error('fail') },
+      maxRetries: 1,
+      retryDelay: () => {
+        release(queue)
+        if (thenThrow) throw new Error('delay')
+        return 0
+      },
+    })
+    queue.on('error', events.error)
+    queue.on('failed', events.failed)
+    queue.queueItem({ id: 'r' })
+
+    expect(events.error).not.toHaveBeenCalled()
+    expect(events.failed).not.toHaveBeenCalled()
+    expect(queue.length()).toBe(0)
+    expect(queue.getDeadLetterQueue()).toEqual([])
+    expect(queue.busy()).toBe(false)
+    expect(Object.values(queue._bookkeepingSizes()).every(size => size === 0)).toBe(true)
+  })
+
+  test('a released id that retryDelay queues again runs as a new item, without the retry', async () => {
+    const runs: string[] = []
+    const queue: ProcessQueue<TestItem> = new ProcessQueue<TestItem>({
+      worker: async item => {
+        runs.push(item.value!)
+        if (item.value === 'original') throw new Error('fail')
+      },
+      maxRetries: 1,
+      retryDelay: () => {
+        queue.doneProcessing('r')
+        queue.queueItem({ id: 'r', value: 'queued by retryDelay' })
+        return 0
+      },
+    })
+    queue.queueItem({ id: 'r', value: 'original' })
+    await queue.onIdle()
+
+    expect(runs).toEqual(['original', 'queued by retryDelay'])
+    expect(queue.getDeadLetterQueue()).toEqual([])
+  })
+})
+
+describe('ProcessQueue - a retryDelay function that times out the failed run', () => {
+  afterEach(() => { vi.useRealTimers() })
+
+  test('reports the timeout, and the failure is ignored', () => {
+    vi.useFakeTimers()
+    const events = { error: vi.fn(), failed: vi.fn(), timeout: vi.fn() }
+    const queue: ProcessQueue<TestItem> = new ProcessQueue<TestItem>({
+      worker: () => {
+        vi.advanceTimersByTime(50)
+        throw new Error('fail')
+      },
+      processingTimeout: 10,
+      maxRetries: 1,
+      retryDelay: () => {
+        queue.checkProcessingTimeouts()
+        return 0
+      },
+    })
+    queue.on('error', events.error)
+    queue.on('failed', events.failed)
+    queue.on('timeout', events.timeout)
+    queue.queueItem({ id: 'r' })
+
+    expect(events.timeout).toHaveBeenCalledWith({ id: 'r' }, undefined)
+    expect(events.error).not.toHaveBeenCalled()
+    expect(events.failed).not.toHaveBeenCalled()
+    expect(queue.length()).toBe(0)
+    expect(queue.busy()).toBe(false)
+    expect(Object.values(queue._bookkeepingSizes()).every(size => size === 0)).toBe(true)
+  })
+})
